@@ -1,0 +1,10 @@
+# GitHub 上での言語判定
+*.bas linguist-language=VBA
+*.txt -linguist-detectable
+
+# 改行は VBA が扱いやすい CRLF で固定
+*.bas text eol=crlf
+src/SheetModule.txt text eol=crlf
+
+# Shift-JIS のインポート用ファイルは変換しない
+dist/** -text

@@ -1,0 +1,28 @@
+Option Explicit
+
+'==================================================================
+'  シフト表 クリック入力マクロ  ＜シートモジュール＞
+'  ※ シフト表のシート見出しを右クリック →「コードの表示」で開き、
+'    ここに貼り付けてください（標準モジュールではありません）
+'==================================================================
+
+' セルを選んだだけ（シングルクリック）
+'   → 既定では何もしません。CYCLE_TRIGGER を "single" にしたときだけ動きます。
+Private Sub Worksheet_SelectionChange(ByVal Target As Range)
+    Dim h As Boolean
+    ShiftClick_Handle Target, "select", h
+End Sub
+
+' ダブルクリック → 次の記号へ／スタンプを押す
+Private Sub Worksheet_BeforeDoubleClick(ByVal Target As Range, Cancel As Boolean)
+    Dim h As Boolean
+    ShiftClick_Handle Target, "double", h
+    If h Then Cancel = True
+End Sub
+
+' 右クリック → 1つ前に戻す／選択範囲にまとめてスタンプ
+Private Sub Worksheet_BeforeRightClick(ByVal Target As Range, Cancel As Boolean)
+    Dim h As Boolean
+    ShiftClick_Handle Target, "right", h
+    If h Then Cancel = True
+End Sub

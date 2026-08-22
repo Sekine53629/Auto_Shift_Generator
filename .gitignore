@@ -1,0 +1,14 @@
+# Excel
+~$*.xls*
+*.xlk
+*.tmp
+
+# 実データを含むブックは追跡しない（テンプレートを置く場合は !example/ で除外解除）
+*.xlsm
+*.xlsx
+!example/*.xlsm
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini

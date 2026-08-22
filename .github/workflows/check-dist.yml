@@ -1,0 +1,17 @@
+name: check-dist
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+      - name: dist/ が src/ と一致しているか確認
+        run: python3 tools/build_sjis.py --check
