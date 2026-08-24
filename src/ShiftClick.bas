@@ -1,26 +1,35 @@
 Option Explicit
 '==================================================================
-'  シフト表 クリック入力マクロ  ＜標準モジュール＞
-'  最終更新: 2026-08-24 (v8 : パレット生成位置を「過不足セルの下」に動的化)
+'  シフト表 クリック入力マクロ  ＜標準モジュール ShiftClick v8.2＞
+'  最終更新: 2026-08-24
+'  シフト入力範囲（マクロの判定対象）:
+'    上端 = 日付行(10行)の1行下
+'    下端 = 医師数(診)の2行上   ← 医師数の1行上は緩衝行(判定対象外)
+'    現行: B11:AF25
 '  パレット構成（横1行）:
 '    過不足行 +1 = ★マーカー行 / +2 = パレット本体 / +3 = ラベル行
-'    （現状: 27行=過不足 / 28行=マーカー / 29行=本体 / 30行=ラベル）
+'    現行: 29行=過不足 / 30行=マーカー / 31行=本体 / 32行=ラベル
 '  動的範囲（ブック定義の名前付き範囲）:
-'    「シフトパレット範囲」= シフト入力欄（B10の次行?薬剤師出勤数の1つ上）
-'    「シフトパレット」    = パレット本体（過不足行+2、ラベル行の最終セルまで自動拡張）
-'  ※名前が見つからない場合のみ、下の定数にフォールバックします
+'    「シフトパレット範囲」= シフト入力欄
+'    「シフトパレット」    = パレット本体（ラベル行の最終セルまで自動拡張）
+'  v8.1: 見出しをマーカー行の左に配置
+'  v8.2: フォールバックを B11:AF25 / B31:N31 に更新
+'        セルフチェックに範囲の妥当性判定を追加
 '==================================================================
 '------------------------ 設定 ここから ---------------------------
 ' 動的範囲の名前
 Public Const SHIFT_RANGE_NAME  As String = "シフトパレット範囲"
 Public Const PALETTE_NAME      As String = "シフトパレット"
 ' フォールバック用（名前付き範囲が見つからない場合のみ使用）
-Public Const SHIFT_RANGE       As String = "B13:AF22"
-Public Const PALETTE_RANGE     As String = "B29:N29"
-' パレット位置の基準: A列の見出し（前方一致で検索）
+Public Const SHIFT_RANGE       As String = "B11:AF25"
+Public Const PALETTE_RANGE     As String = "B31:N31"
+' 範囲の基準ラベル（A列を前方一致で検索）
 Public Const SHORTAGE_LABEL    As String = "過不足"
+Public Const DOC_LABEL         As String = "医師数"
+' 入力範囲の下端を医師数(診)から何行上にするか
+Public Const DOC_GAP           As Long = 2
 ' パレットの起点セル（過不足が見つからない場合のフォールバック）
-Public Const PALETTE_HOME      As String = "B29"
+Public Const PALETTE_HOME      As String = "B31"
 
 Public Const CYCLE_TRIGGER As String = "double"
 Public Const STAMP_TRIGGER As String = "double"
@@ -57,14 +66,19 @@ Private Function PaletteRange(ByVal ws As Worksheet) As Range
     If PaletteRange Is Nothing Then Set PaletteRange = ws.Range(PALETTE_RANGE)
 End Function
 
-'--- 過不足セル（A列を前方一致で検索） ---
-Private Function ShortageCell(ByVal ws As Worksheet) As Range
+'--- A列のラベルを前方一致で検索 ---
+Private Function FindLabel(ByVal ws As Worksheet, ByVal lbl As String) As Range
     On Error Resume Next
-    Set ShortageCell = ws.Columns(1).Find(What:=SHORTAGE_LABEL, _
-                                          LookIn:=xlValues, _
-                                          LookAt:=xlPart, _
-                                          MatchCase:=False)
+    Set FindLabel = ws.Columns(1).Find(What:=lbl, _
+                                       LookIn:=xlValues, _
+                                       LookAt:=xlPart, _
+                                       MatchCase:=False)
     On Error GoTo 0
+End Function
+
+'--- 過不足セル ---
+Private Function ShortageCell(ByVal ws As Worksheet) As Range
+    Set ShortageCell = FindLabel(ws, SHORTAGE_LABEL)
 End Function
 
 '--- パレット起点セルを「過不足セルの下」から動的に決める ---
@@ -419,7 +433,7 @@ Public Sub ShiftClick_パレット作成()
     For i = 5 To 7   ' ○●▲ は少し大きく
         pal.Cells(1, i).Font.size = 12
     Next i
-    With pal.Cells(1, 1).Offset(0, -1)   ' A列に見出し（マーカー行の左）
+    With pal.Cells(1, 1).Offset(MARKER_OFFSET, -1)   ' マーカー行の左に見出し
         .Value = "シフトパレット"
         .Font.Bold = True
         .HorizontalAlignment = xlRight
@@ -432,6 +446,7 @@ End Sub
 
 Public Sub ShiftClick_セルフチェック()
     Dim ws As Worksheet, msg As String, srcS As String, srcP As String, srcH As String
+    Dim sr As Range, docCell As Range, warn As String, endRow As Long
     Set ws = ActiveSheet
     On Error GoTo EH
     srcS = "定数（フォールバック）": srcP = "定数（フォールバック）"
@@ -444,13 +459,28 @@ Public Sub ShiftClick_セルフチェック()
     Else
         srcH = SHORTAGE_LABEL & "=" & ShortageCell(ws).Address(False, False) & " の2行下"
     End If
+    '--- 入力範囲の妥当性(下端が医師数の2行上か) ---
+    Set sr = ShiftRange(ws)
+    Set docCell = FindLabel(ws, DOC_LABEL)
+    If Not docCell Is Nothing Then
+        endRow = sr.Row + sr.Rows.Count - 1
+        If endRow > docCell.Row - DOC_GAP Then
+            warn = vbCrLf & "? 範囲の下端(" & endRow & "行)が " & DOC_LABEL & "(" & _
+                   docCell.Row & "行)の" & DOC_GAP & "行上を超えています" & vbCrLf & _
+                   "　正しい終端: " & (docCell.Row - DOC_GAP) & "行" & vbCrLf
+        ElseIf endRow < docCell.Row - DOC_GAP Then
+            warn = vbCrLf & "※ 範囲の下端(" & endRow & "行)が " & _
+                   (docCell.Row - DOC_GAP) & "行 より上です(入力できる行が少なくなっています)" & vbCrLf
+        End If
+    End If
     msg = "シート名          : " & ws.Name & vbCrLf & _
-          "シフト入力範囲    : " & ShiftRange(ws).Address(False, False) & "　←" & srcS & vbCrLf & _
+          "シフト入力範囲    : " & sr.Address(False, False) & "　←" & srcS & vbCrLf & _
+          "　上端=日付行の1行下 / 下端=" & DOC_LABEL & "の" & DOC_GAP & "行上" & vbCrLf & _
           "パレット範囲      : " & PaletteRange(ws).Address(False, False) & "　←" & srcP & vbCrLf & _
           "パレット起点(生成): " & PaletteHome(ws).Address(False, False) & "　←" & srcH & vbCrLf & _
           "パレットのセル数  : " & PaletteRange(ws).Cells.Count & vbCrLf & _
           "切替サイクル項目数: " & UBound(CycleValues(ws)) + 1 & vbCrLf & _
-          "現在のモード番号  : " & CurrentIndex(ws) & vbCrLf & vbCrLf & _
+          "現在のモード番号  : " & CurrentIndex(ws) & vbCrLf & warn & vbCrLf & _
           "ここまで表示されれば、標準モジュールは正しく入っています。"
     MsgBox msg, vbInformation, "ShiftClick セルフチェック"
     Exit Sub
