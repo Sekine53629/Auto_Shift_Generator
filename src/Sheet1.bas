@@ -91,3 +91,4 @@ Private Sub CacheGridState(ByVal rng As Range)
     Next c
     mN = k
 End Sub
+
