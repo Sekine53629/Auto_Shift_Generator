@@ -34,7 +34,7 @@
 <body>
 
 <h1>くるむ薬局札幌店　シフト表 操作マニュアル</h1>
-<p class="sub">対象ファイル: くるむ薬局_シフト_自動集計版.xlsm　/　ShiftAuto v7.0.0・ShiftClick v8　/　2026-08-24</p>
+<p class="sub">対象ファイル: くるむ薬局_シフト_自動集計版.xlsm　/　ShiftAuto v7.2.0・ShiftClick v8.2　/　2026-08-24</p>
 
 <div class="info">
 <strong>このシステムでできること</strong><br>
@@ -53,18 +53,29 @@
 <h3>シフトシートの行構成</h3>
 <table>
 <tr><th style="width:110px">位置</th><th>内容</th></tr>
-<tr><td class="c">A1</td><td>対象月の日付（この月のシフトを作成します）</td></tr>
+<tr><td class="c">A1</td><td>対象月の日付（この月のシフトを作成します）。<strong>変更するとログのリセット確認</strong>が出ます（期替わり）</td></tr>
 <tr><td class="c">4〜8行</td><td>医師名（出勤する医師を記入 → 医師数に自動反映）</td></tr>
 <tr><td class="c">10行</td><td>日付行</td></tr>
-<tr><td class="c">11行〜</td><td><strong>シフト入力欄</strong>（A列に氏名、各日にシフト記号）</td></tr>
-<tr><td class="c">医師数(診)</td><td>その日の医師数（自動計算）</td></tr>
-<tr><td class="c">薬剤師出勤数</td><td>その日の薬剤師の出勤数（自動計算）</td></tr>
-<tr><td class="c">過不足</td><td><strong>出勤数 − 必要数</strong>。マイナスは人員不足</td></tr>
-<tr><td class="c">その下3行</td><td>★マーカー行 / パレット本体 / ラベル行</td></tr>
+<tr><td class="c">11〜25行</td><td><strong>シフト入力欄</strong>（A列に氏名、各日にシフト記号）</td></tr>
+<tr><td class="c">26行</td><td><strong>緩衝行</strong>（入力欄の外。行追加ののりしろ。ここには入力しません）</td></tr>
+<tr><td class="c">27行</td><td><code>医師数(診)</code>　その日の医師数（自動計算）</td></tr>
+<tr><td class="c">28行</td><td><code>薬剤師出勤数</code>　その日の薬剤師の出勤数（自動計算）</td></tr>
+<tr><td class="c">29行</td><td><code>過不足</code>　<strong>出勤数 − 必要数</strong>。マイナスは人員不足</td></tr>
+<tr><td class="c">30〜32行</td><td>★マーカー行 / パレット本体 / ラベル行</td></tr>
 </table>
 
 <div class="info">
-入力欄の範囲・パレットの位置は<strong>自動追従</strong>します。行を挿入しても、空行を追加しても、範囲指定を直す必要はありません。
+<strong>入力欄の範囲ルール（v7.2.0）</strong><br>
+・上端 = <strong>日付行（10行）の1行下</strong><br>
+・下端 = <strong><code>医師数(診)</code> の2行上</strong>　←1行上は緩衝行なので入力欄に含めません<br><br>
+入力欄の範囲・パレットの位置は<strong>自動追従</strong>します。入力欄の内側に行を挿入しても、空行を追加しても、範囲指定を直す必要はありません。
+</div>
+
+<div class="warn">
+<strong>行を増やして緩衝行が埋まってしまったら</strong> 名前付き範囲「シフトパレット範囲」の終端を <code>医師数(診)</code> の2行上に直してください。数式で自動追従させる場合は次の定義を使います。
+<div class="flow">=INDEX(シフト!$B:$B,ROW(シフト!$B$10)+1)
+ :INDEX(シフト!$AF:$AF,MATCH("医師数*",シフト!$A:$A,0)-2)</div>
+ずれている場合は <span class="macro">シフト自動作成</span> と <span class="macro">シフト設定チェック</span> が警告を出します。
 </div>
 
 <h2>2. シフトパレットの使い方</h2>
@@ -93,10 +104,10 @@
 <table>
 <tr><th style="width:220px">マクロ名</th><th>用途</th></tr>
 <tr><td><span class="macro">ShiftClick_パターン追加</span></td><td>パレット右端に新しい記号を追加（記号とラベルを入力）</td></tr>
-<tr><td><span class="macro">ShiftClick_パレット作成</span></td><td>パレットを既定内容で作り直す（過不足行の下に自動配置）</td></tr>
+<tr><td><span class="macro">ShiftClick_パレット作成</span></td><td>パレットを既定内容で作り直す（<code>過不足</code> 行の下に自動配置。見出しはマーカー行の左に入ります）</td></tr>
 <tr><td><span class="macro">ShiftClick_連続切替に戻す</span></td><td>モードを「切替」に戻す</td></tr>
 <tr><td><span class="macro">ShiftClick_選択範囲にスタンプ</span></td><td>選択範囲に現在の記号をまとめて押す</td></tr>
-<tr><td><span class="macro">ShiftClick_セルフチェック</span></td><td>範囲設定が正しいか確認（トラブル時）</td></tr>
+<tr><td><span class="macro">ShiftClick_セルフチェック</span></td><td>範囲設定が正しいか確認（トラブル時）。<strong>入力範囲の下端が正しい位置か</strong>も判定します</td></tr>
 </table>
 
 <div class="warn">
@@ -155,6 +166,7 @@ STEP 7   手修正で仕上げ
 <p>設定後、<span class="macro">シフト設定チェック</span> を実行して警告がゼロか確認してください。</p>
 <table>
 <tr><th style="width:170px">警告</th><th>意味と対処</th></tr>
+<tr><td>入力範囲が下すぎる</td><td>範囲の下端が <code>医師数(診)</code> の2行上を超えている。名前付き範囲「シフトパレット範囲」の終端を直す</td></tr>
 <tr><td>氏名の重複</td><td>同名が2行ある。先に見つかった設定だけが適用されるため、区別できる氏名に変更</td></tr>
 <tr><td>区分が対象外</td><td>「薬剤師」「事務員」以外。出勤数に計上されないので修正</td></tr>
 <tr><td>マスタ未登録</td><td>シフト表にあるがマスタに無い。既定値（薬剤師・通常・遅番可）で処理されます</td></tr>
@@ -185,8 +197,8 @@ STEP 7   手修正で仕上げ
 <p><span class="macro">シフト自動作成</span> を実行します。内部の処理順序は次の通りです。</p>
 <table>
 <tr><th style="width:40px">順</th><th style="width:210px">処理</th><th>内容</th></tr>
-<tr><td class="c">1</td><td>整合性チェック</td><td>問題があれば確認ダイアログ（中止できます）</td></tr>
-<tr><td class="c">2</td><td>空行スキップ</td><td>氏名が空の行は完全に対象外</td></tr>
+<tr><td class="c">1</td><td>整合性チェック</td><td>入力範囲の位置と氏名の不整合を確認。問題があれば確認ダイアログ（中止できます）</td></tr>
+<tr><td class="c">2</td><td>空行・集計行スキップ</td><td>氏名が空の行に加え、<code>医師数</code> <code>薬剤師出勤数</code> <code>事務員出勤数</code> <code>過不足</code> <code>合計</code> <code>シフトパレット</code> で始まる行も氏名として扱いません（v7.1.0）</td></tr>
 <tr><td class="c">3</td><td>既存入力の保護</td><td>入力済みセルを「出勤確定」「休み確定」に分類</td></tr>
 <tr><td class="c">4</td><td>勤務ルール適用</td><td>固定曜日・週N日・手動・通常に応じて仮配置</td></tr>
 <tr><td class="c">5</td><td>週N日の絞り込み</td><td>週あたり勤務日数を上限まで削る</td></tr>
@@ -208,6 +220,8 @@ STEP 7   手修正で仕上げ
 <p>実行後のダイアログに表示される内容です。</p>
 <table>
 <tr><th style="width:200px">表示</th><th>意味</th></tr>
+<tr><td>入力範囲</td><td>今回処理した入力欄のアドレス。意図した範囲か確認できます</td></tr>
+<tr><td>対象者／スキップ行</td><td>氏名のある行数と、空行・集計行として除外した行数</td></tr>
 <tr><td>各人の集計</td><td>出勤／休／連勤max／連休max／医5日／○●▲の回数</td></tr>
 <tr><td>公休ノルマ未達</td><td>空きセルが足りず配置しきれなかった。手入力を減らすか休日数を見直す</td></tr>
 <tr><td>事務員が不在の日</td><td>事務員ゼロの日数。回避を試みますが不可能な場合に発生</td></tr>
@@ -231,7 +245,7 @@ STEP 7   手修正で仕上げ
 <tr><th style="width:200px">マクロ名</th><th>動作</th></tr>
 <tr><td><span class="macro">シフト変更を戻す</span></td><td>直前のセッションを取り消して復元。<strong>繰り返し実行で1回ずつ遡れます</strong>（値・文字色・太字・背景色すべて復元）</td></tr>
 <tr><td><span class="macro">シフト白紙化</span></td><td>入力欄を全消去。これもログに記録され復元可能</td></tr>
-<tr><td><span class="macro">シフトログリセット</span></td><td>ログを全消去。<strong>実行後は過去に戻せなくなります</strong>（期替わり用）</td></tr>
+<tr><td><span class="macro">シフトログリセット</span></td><td>ログを全消去。<strong>実行後は過去に戻せなくなります</strong>（期替わり用）。<strong>A1の対象月を変更すると自動で確認ダイアログ</strong>が出ます</td></tr>
 </table>
 
 <div class="info">
@@ -252,6 +266,7 @@ STEP 7   手修正で仕上げ
 
 <h3>薬剤師と事務員を見やすく分ける</h3>
 <p>間に<strong>空行を入れて構いません</strong>。氏名が空の行は自動生成で完全にスキップされます（v7.0.0以降）。区切り線や背景色を付けた行も問題ありません。</p>
+<p>また <code>医師数</code> <code>薬剤師出勤数</code> <code>事務員出勤数</code> <code>過不足</code> <code>合計</code> <code>シフトパレット</code> で始まる行は、<strong>入力範囲に紛れ込んでも氏名として扱われません</strong>（v7.1.0）。範囲がずれた時の保険です。</p>
 
 <h3>休業・退職する場合</h3>
 <p>マスタの「休業(○=休業中)」列に <code>○</code> を入れてください。その月は一切配置されません。シフト表の行は残しておいて構いません。</p>
@@ -282,8 +297,11 @@ STEP 7   手修正で仕上げ
 <tr><td>休業設定が効いていない</td><td>氏名がシフト表と一致していない。<span class="macro">シフト設定チェック</span> で確認</td></tr>
 <tr><td>特定の人だけ設定が反映されない</td><td>氏名の綴り違い（全角/半角・スペース）。または同名が2行ある</td></tr>
 <tr><td>ダブルクリックが反応しない</td><td>パレットが <code>OFF</code> モード。<code>切替</code> か記号を選ぶ</td></tr>
-<tr><td>パレットの位置がずれた</td><td><span class="macro">ShiftClick_パレット作成</span> で作り直す（過不足行の下に配置されます）</td></tr>
-<tr><td>範囲がおかしい</td><td><span class="macro">ShiftClick_セルフチェック</span> で範囲と参照元を確認</td></tr>
+<tr><td>パレットの位置がずれた</td><td><span class="macro">ShiftClick_パレット作成</span> で作り直す（<code>過不足</code> 行の下に配置されます）</td></tr>
+<tr><td>「入力範囲が医師数(診)の2行上を超えています」</td><td>行を増やして緩衝行が埋まっている。名前付き範囲「シフトパレット範囲」の終端を <code>医師数(診)</code> の2行上に直す（1章の数式を参照）</td></tr>
+<tr><td>入力できる行が足りない</td><td>範囲の下端が上すぎる。同じく終端を <code>医師数(診)</code> の2行上まで広げる</td></tr>
+<tr><td>集計行にシフトが入る</td><td>v7.1.0で除外済み。モジュールが古い可能性があります</td></tr>
+<tr><td>範囲がおかしい</td><td><span class="macro">ShiftClick_セルフチェック</span> で範囲と参照元、下端の妥当性を確認</td></tr>
 <tr><td>公休ノルマ未達が出る</td><td>手入力が多すぎて空きセルが不足。手入力を減らす</td></tr>
 <tr><td>人員不足の日が多い</td><td>公休ノルマ優先の設計上の結果。派遣投入か L10 の見直し</td></tr>
 <tr><td>結果が気に入らない</td><td><span class="macro">シフト変更を戻す</span> → 入力を調整 → 再実行</td></tr>
@@ -302,11 +320,12 @@ STEP 7   手修正で仕上げ
 <tr><td class="c">☐</td><td>結果レポートの警告を確認</td></tr>
 <tr><td class="c">☐</td><td>過不足行のマイナス日を確認・調整</td></tr>
 <tr><td class="c">☐</td><td>手修正で仕上げ</td></tr>
+<tr><td class="c">☐</td><td>行を増やした場合は <span class="macro">ShiftClick_セルフチェック</span> で入力範囲を確認</td></tr>
 <tr><td class="c">☐</td><td>ファイルを保存（マクロ有効形式 .xlsm）</td></tr>
 </table>
 
 <footer>
-くるむ薬局札幌店 シフト表 操作マニュアル　/　ShiftAuto v7.0.0・ShiftClick v8 準拠<br>
+くるむ薬局札幌店 シフト表 操作マニュアル　/　ShiftAuto v7.2.0・ShiftClick v8.2 準拠<br>
 このマニュアルはブラウザで開いて印刷・PDF保存できます。
 </footer>
 
