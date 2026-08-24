@@ -725,11 +725,11 @@ Private Function BuildCfgSheet(ByVal ws As Worksheet) As Worksheet
     cfg.Name = CFG_SHEET
 
     cfg.Range("A1").Value = "シフト自動作成 設定"
-    cfg.Range("A1").Font.Bold = True: cfg.Range("A1").Font.Size = 14
+    cfg.Range("A1").Font.Bold = True: cfg.Range("A1").Font.size = 14
     cfg.Range("A2").Value = "希望休はシフト表に「希休」スタンプで入力してください。実行時、入力済みのセルはすべて保持され、空白セルのみ自動で埋まります。"
     cfg.Range("A3").Value = "派遣スタッフの行をシフト表に追加したら、この表にも氏名を追加し「勤務ルール=手動」を設定してください。"
     cfg.Range("A2:A3").Font.Italic = True
-    cfg.Range("A2:A3").Font.Size = 9
+    cfg.Range("A2:A3").Font.size = 9
     cfg.Range("A2:A3").Font.Color = RGB(128, 128, 128)
 
     '--- メンバー表ヘッダー(4行目) ---
@@ -1195,3 +1195,22 @@ Public Sub LogManualSession(ByVal addrs As Variant, ByVal oldVals As Variant, _
         End If
     Next k
 End Sub
+
+'--- ログ全消去(期替わり用リセット) ---
+Public Sub シフトログリセット(Optional ByVal ask As Boolean = True)
+    Dim lg As Worksheet, lr As Long
+    On Error Resume Next
+    Set lg = Worksheets(LOG_SHEET)
+    On Error GoTo 0
+    If lg Is Nothing Then Exit Sub
+    lr = lg.Cells(lg.Rows.Count, 1).End(xlUp).Row
+    If lr < 2 Then Exit Sub
+    If ask Then
+        If MsgBox("変更ログ(" & lr - 1 & "行)をすべて消去します。" & vbCrLf & _
+                  "消去後は「シフト変更を戻す」で過去の状態に戻せなくなります。よろしいですか?", _
+                  vbYesNo + vbExclamation, "シフトログ リセット") <> vbYes Then Exit Sub
+    End If
+    lg.Rows("2:" & lr).Delete
+End Sub
+
+
