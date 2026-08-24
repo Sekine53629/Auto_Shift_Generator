@@ -1,6 +1,6 @@
 Option Explicit
 '==================================================================
-'  シフト自動作成  ＜標準モジュール ShiftAuto v6.5.0＞  2026-08-24
+'  シフト自動作成  ＜標準モジュール ShiftAuto v7.2.0＞  2026-08-24
 '  ルールはすべてシート「自動作成設定」から読込(K列ラベル部分一致):
 '   L5=早番(○)人数/日  L6=遅番(▲)最低人数/日(誤差-1)
 '   L7=連勤の上限  L8=連休の上限  L9=週の基本休日数
@@ -11,11 +11,18 @@ Option Explicit
 '   固定曜日・週N日・手動(派遣)ルール/週2休基本+2?3連休化/連勤上限/
 '   医5日均等(誤差1)/○●▲均等(誤差2)/▲最低人数(誤差-1)/
 '   事務員不在の日をなるべく回避・事務員の○は1日1人
-'  v6.5.0 追加:
-'   ・設定シートが無い場合は既定値で自動生成(BuildCfgSheet)
-'   ・差分ログ「シフト変更ログ」: 変更セル/変更前後/書式を全記録
-'   ・「シフト変更を戻す」= 最後のセッションを逆再生して復元(繰返し可)
-'   ・「シフト白紙化」= 入力欄を全消去(こちらもログに記録され復元可)
+'  v6.5.0: 設定シート自動生成/差分ログ/変更を戻す/白紙化
+'  v7.0.0: 氏名が空欄の行を完全スキップ / 整合性チェック集約
+'  v7.1.0: 集計行ラベル(医師数(診)等)を氏名として扱わない IsNonName 判定
+'  v7.2.0 変更:
+'   ・入力範囲の仕様を明確化
+'       上端 = 日付行(10行)の1行下
+'       下端 = 医師数(診)の2行上   ← 医師数の1行上は緩衝行(範囲外)
+'   ・フォールバックを B11:AF25 / パレット B31:N31 に更新
+'   ・範囲チェックを「医師数の2行上を超えたら警告」に変更
+'  ※名前付き範囲「シフトパレット範囲」は現行 B11:AF25
+'    　=INDEX(シフト!$B:$B,ROW(シフト!$B$10)+1)
+'    　:INDEX(シフト!$AF:$AF,MATCH("医師数*",シフト!$A:$A,0)-2)
 '==================================================================
 Private Const CFG_SHEET As String = "自動作成設定"
 Private Const HOL_SHEET As String = "祝日マスタ"
@@ -25,8 +32,19 @@ Private Const SYM_EARLY As String = "○"
 Private Const SYM_MID   As String = "●"
 Private Const SYM_LATE  As String = "▲"
 Private Const SYM_OFF   As String = "公休"
+' 区分の正規値(これ以外は警告)
+Private Const KIND_PH   As String = "薬剤師"
+Private Const KIND_CL   As String = "事務員"
+' 氏名として扱わない集計行ラベル(前方一致・カンマ区切り)
+Private Const NON_NAME_LABELS As String = _
+    "医師数,薬剤師出勤数,事務員出勤数,過不足,合計,シフトパレット"
+' 入力範囲の下端を医師数(診)から何行上にするか
+Private Const DOC_GAP   As Long = 2
+' フォールバック(名前付き範囲が壊れている場合のみ)
+Private Const FB_SHIFT   As String = "B11:AF25"
+Private Const FB_PALETTE As String = "B31:N31"
 ' 予定ステータス
-Private Const ST_SKIP  As Long = -1   ' 月外・休業
+Private Const ST_SKIP  As Long = -1   ' 月外・休業・空行・集計行
 Private Const ST_WORK  As Long = 1    ' 自動:出勤
 Private Const ST_OFF   As Long = 2    ' 自動:公休
 Private Const ST_FWORK As Long = 3    ' 既存入力:出勤(○◯●▲)
@@ -34,6 +52,7 @@ Private Const ST_FOFF  As Long = 4    ' 既存入力:休み(希休・有休・�
 '--- モジュール内共有状態 ---
 Private mPlan() As Long, mKind() As String, mRule() As String
 Private mLeave() As Boolean, mCanLate() As Boolean
+Private mSkipRow() As Boolean          ' 氏名が空・集計行 = 処理対象外
 Private mDayIn() As Boolean, mDayWD() As Long, mDayHol() As Boolean
 Private mDayDoc() As Long, mDayReq() As Long, mWkKey() As Long
 Private mCov() As Long          ' 薬剤師の予定出勤数
@@ -41,6 +60,26 @@ Private mCovG() As Long         ' 事務員の予定出勤数
 Private mSymb() As String, mCntE() As Long, mCntM() As Long, mCntL() As Long
 Private mMaxRun As Long, mMaxOffRun As Long, mPaidSyms As String
 Private mNP As Long, mND As Long
+
+'==================================================================
+' 氏名判定
+'==================================================================
+'--- 集計行のラベルか?(氏名ではない行を除外) ---
+Private Function IsNonName(ByVal s As String) As Boolean
+    Dim parts() As String, p As Long, t As String
+    t = Trim$(s)
+    If Len(t) = 0 Then Exit Function
+    parts = Split(NON_NAME_LABELS, ",")
+    For p = LBound(parts) To UBound(parts)
+        If Len(Trim$(parts(p))) > 0 Then
+            If InStr(1, t, Trim$(parts(p)), vbTextCompare) = 1 Then
+                IsNonName = True
+                Exit Function
+            End If
+        End If
+    Next p
+End Function
+
 Public Sub シフト自動作成()
     Dim ws As Worksheet, cfg As Worksheet, holWs As Worksheet, grid As Range
     Dim i As Long, j As Long, k As Long, r As Long, w As Long, j0 As Long
@@ -49,6 +88,7 @@ Public Sub シフト自動作成()
     Dim pName() As String, pWD() As Boolean
     Dim pWeekN() As Long, pQuota() As Long, pFound() As Boolean
     Dim missing As String, unmet As String, v As String
+    Dim orphan As String, dupName As String, badKind As String
     Dim quota As Long, offN As Long, remOff() As Long
     Dim processed() As Boolean, cnt As Long, wCnt As Long, tgt As Long, autoW As Long
     Dim bj As Long, bs As Double, sc As Double
@@ -62,12 +102,14 @@ Public Sub シフト自動作成()
     Dim needE As Long, needL As Long
     Dim dayL As Long, dayM As Long
     Dim bi As Long, bv As Long, symS As String
-    Dim written As Long
+    Dim written As Long, activeN As Long, skipN As Long
     Dim msg As String, offC As Long, wC As Long, paidC As Long
     Dim shortN As Long, worst As Long
     Dim lateShort As Long, lateBad As Long, dayLateN As Long
     Dim lg As Worksheet, sess As Long, lgR As Long, tv As String, cCell As Range
     Dim logged As Long
+    Dim nmCheck As String, hit As Long, ii As Long
+
     '=== 準備 ===
     Set ws = Worksheets("シフト")
     On Error Resume Next
@@ -89,6 +131,7 @@ Public Sub シフト自動作成()
     If Not IsDate(ws.Range("A1").Value) Then
         MsgBox "シフト!A1 に対象月の日付がありません。", vbExclamation: Exit Sub
     End If
+
     '=== 全体設定の読込(K列ラベルの部分一致検索) ===
     earlyN = CLng(CfgNum(cfg, "早番", 1))
     lateMin = CLng(CfgNum(cfg, "遅番", 3))
@@ -103,6 +146,7 @@ Public Sub シフト自動作成()
     If mMaxRun < 1 Then mMaxRun = 1
     If mMaxOffRun < 1 Then mMaxOffRun = 1
     If weekBase < 0 Then weekBase = 0
+
     Set grid = AutoShiftRange(ws)
     mNP = grid.Rows.Count: mND = grid.Columns.Count
     dateRow = grid.Row - 1
@@ -111,7 +155,16 @@ Public Sub シフト自動作成()
         MsgBox "「" & DOC_LABEL & "」行が見つかりません。", vbExclamation: Exit Sub
     End If
     docRow = CLng(mres)
+    '--- 入力範囲が集計行に近すぎないか確認(下端は医師数の2行上まで) ---
+    If grid.Row + mNP - 1 > docRow - DOC_GAP Then
+        MsgBox "シフト入力範囲(" & grid.Address(False, False) & ")が" & vbCrLf & _
+               "「" & DOC_LABEL & "」行(" & docRow & "行)の" & DOC_GAP & "行上を超えています。" & vbCrLf & vbCrLf & _
+               "名前付き範囲「シフトパレット範囲」の終端を" & vbCrLf & _
+               "「" & DOC_LABEL & "」の" & DOC_GAP & "行上(" & (docRow - DOC_GAP) & "行)に修正してください。" & vbCrLf & _
+               "(集計行は氏名として扱われないため処理は続行できます)", vbExclamation
+    End If
     monthNum = Month(ws.Range("A1").Value)
+
     '=== 日情報 ===
     ReDim dayDt(1 To mND): ReDim mDayIn(1 To mND): ReDim mDayWD(1 To mND)
     ReDim mDayHol(1 To mND): ReDim mDayDoc(1 To mND): ReDim mDayReq(1 To mND)
@@ -138,35 +191,105 @@ Public Sub シフト自動作成()
             End If
         End If
     Next j
-    '=== メンバー設定読込(A列が空白になるまで・人数可変) ===
+
+    '=== メンバー設定読込(氏名キー照合・空行と集計行はスキップ) ===
     ReDim pName(1 To mNP): ReDim mKind(1 To mNP): ReDim mLeave(1 To mNP)
     ReDim mRule(1 To mNP): ReDim pWD(1 To mNP, 1 To 7): ReDim pWeekN(1 To mNP)
     ReDim pQuota(1 To mNP): ReDim mCanLate(1 To mNP): ReDim pFound(1 To mNP)
+    ReDim mSkipRow(1 To mNP)
+    activeN = 0: skipN = 0
     For i = 1 To mNP
         pName(i) = Trim$(CStr(ws.Cells(grid.Row + i - 1, 1).Value))
-        mKind(i) = "薬剤師": mRule(i) = "通常": mCanLate(i) = True: pQuota(i) = -1
-        r = 5
-        Do While Len(Trim$(CStr(cfg.Cells(r, 1).Value))) > 0
-            If Trim$(CStr(cfg.Cells(r, 1).Value)) = pName(i) Then
-                pFound(i) = True
-                If Len(Trim$(CStr(cfg.Cells(r, 2).Value))) > 0 Then mKind(i) = Trim$(CStr(cfg.Cells(r, 2).Value))
-                mLeave(i) = (Trim$(CStr(cfg.Cells(r, 3).Value)) <> "")
-                If Len(Trim$(CStr(cfg.Cells(r, 4).Value))) > 0 Then mRule(i) = Trim$(CStr(cfg.Cells(r, 4).Value))
-                ParseWD CStr(cfg.Cells(r, 5).Value), pWD, i
-                pWeekN(i) = Val(cfg.Cells(r, 6).Value)
-                If Len(Trim$(CStr(cfg.Cells(r, 7).Value))) > 0 Then pQuota(i) = Val(cfg.Cells(r, 7).Value)
-                mCanLate(i) = (Trim$(CStr(cfg.Cells(r, 8).Value)) <> "不可")
-                Exit Do
+        mKind(i) = KIND_PH: mRule(i) = "通常": mCanLate(i) = True: pQuota(i) = -1
+        '--- 氏名が空の行・集計行ラベルは処理対象外 ---
+        If Len(pName(i)) = 0 Or IsNonName(pName(i)) Then
+            mSkipRow(i) = True
+            skipN = skipN + 1
+        Else
+            mSkipRow(i) = False
+            activeN = activeN + 1
+            '--- 同名の重複チェック(照合が先勝ちになり誤配置の原因) ---
+            For ii = 1 To i - 1
+                If Not mSkipRow(ii) Then
+                    If pName(ii) = pName(i) Then
+                        If InStr(dupName, "・" & pName(i) & vbCrLf) = 0 Then
+                            dupName = dupName & "・" & pName(i) & vbCrLf
+                        End If
+                    End If
+                End If
+            Next ii
+            '--- マスタ照合(氏名キー・行番号に依存しない) ---
+            r = 5
+            Do While Len(Trim$(CStr(cfg.Cells(r, 1).Value))) > 0
+                If Trim$(CStr(cfg.Cells(r, 1).Value)) = pName(i) Then
+                    pFound(i) = True
+                    If Len(Trim$(CStr(cfg.Cells(r, 2).Value))) > 0 Then mKind(i) = Trim$(CStr(cfg.Cells(r, 2).Value))
+                    mLeave(i) = (Trim$(CStr(cfg.Cells(r, 3).Value)) <> "")
+                    If Len(Trim$(CStr(cfg.Cells(r, 4).Value))) > 0 Then mRule(i) = Trim$(CStr(cfg.Cells(r, 4).Value))
+                    ParseWD CStr(cfg.Cells(r, 5).Value), pWD, i
+                    pWeekN(i) = Val(cfg.Cells(r, 6).Value)
+                    If Len(Trim$(CStr(cfg.Cells(r, 7).Value))) > 0 Then pQuota(i) = Val(cfg.Cells(r, 7).Value)
+                    mCanLate(i) = (Trim$(CStr(cfg.Cells(r, 8).Value)) <> "不可")
+                    Exit Do
+                End If
+                r = r + 1
+            Loop
+            If Not pFound(i) Then
+                missing = missing & "・" & pName(i) & vbCrLf
+            ElseIf mKind(i) <> KIND_PH And mKind(i) <> KIND_CL Then
+                '--- 区分が正規値以外だと人数計算に計上されず静かに壊れる ---
+                badKind = badKind & "・" & pName(i) & " : 区分「" & mKind(i) & "」" & vbCrLf
             End If
-            r = r + 1
-        Loop
-        If Not pFound(i) And Len(pName(i)) > 0 Then missing = missing & vbCrLf & "・" & pName(i)
+        End If
     Next i
-    '=== 既存入力の分類 ===
+
+    If activeN = 0 Then
+        MsgBox "シフト入力欄(" & grid.Address(False, False) & ")のA列に氏名がありません。" & vbCrLf & _
+               "氏名の記入位置をご確認ください。", vbExclamation
+        Exit Sub
+    End If
+
+    '=== マスタにあるがシフト表に無い氏名(孤児)を検出 ===
+    r = 5
+    Do While Len(Trim$(CStr(cfg.Cells(r, 1).Value))) > 0
+        nmCheck = Trim$(CStr(cfg.Cells(r, 1).Value))
+        If Not IsNonName(nmCheck) Then
+            hit = 0
+            For i = 1 To mNP
+                If Not mSkipRow(i) Then
+                    If pName(i) = nmCheck Then hit = 1: Exit For
+                End If
+            Next i
+            If hit = 0 Then orphan = orphan & "・" & nmCheck & vbCrLf
+        End If
+        r = r + 1
+    Loop
+
+    '=== 整合性チェックの事前確認 ===
+    If Len(missing) > 0 Or Len(orphan) > 0 Or Len(dupName) > 0 Or Len(badKind) > 0 Then
+        msg = "設定の整合性に注意点があります。" & vbCrLf & vbCrLf
+        If Len(dupName) > 0 Then
+            msg = msg & "■ 氏名が重複(先に見つかった設定が適用されます)" & vbCrLf & dupName & vbCrLf
+        End If
+        If Len(badKind) > 0 Then
+            msg = msg & "■ 区分が「" & KIND_PH & "」「" & KIND_CL & "」以外" & vbCrLf & _
+                  "　(出勤数に計上されません)" & vbCrLf & badKind & vbCrLf
+        End If
+        If Len(missing) > 0 Then
+            msg = msg & "■ マスタ未登録(既定値=" & KIND_PH & "・通常・遅番可 で処理)" & vbCrLf & missing & vbCrLf
+        End If
+        If Len(orphan) > 0 Then
+            msg = msg & "■ マスタにあるがシフト表に無い(行削除・氏名変更?)" & vbCrLf & orphan & vbCrLf
+        End If
+        msg = msg & "このまま実行しますか?"
+        If MsgBox(msg, vbYesNo + vbExclamation, "設定チェック") <> vbYes Then Exit Sub
+    End If
+
+    '=== 既存入力の分類(空行・集計行は全日スキップ) ===
     ReDim mPlan(1 To mNP, 1 To mND)
     For i = 1 To mNP
         For j = 1 To mND
-            If Not mDayIn(j) Or mLeave(i) Then
+            If mSkipRow(i) Or Not mDayIn(j) Or mLeave(i) Then
                 mPlan(i, j) = ST_SKIP
             Else
                 v = Trim$(CStr(grid.Cells(i, j).Value))
@@ -180,9 +303,10 @@ Public Sub シフト自動作成()
             End If
         Next j
     Next i
+
     '=== ルール適用(固定曜日 / 手動=何もしない / それ以外は仮で全出勤) ===
     For i = 1 To mNP
-        If Not mLeave(i) Then
+        If Not mSkipRow(i) And Not mLeave(i) Then
             If mRule(i) = "固定曜日" Then
                 For j = 1 To mND
                     If mPlan(i, j) = 0 Then
@@ -198,19 +322,24 @@ Public Sub シフト自動作成()
             End If
         End If
     Next i
+
     '=== 予定出勤数(薬剤師/事務員 別) ===
     ReDim mCov(1 To mND): ReDim mCovG(1 To mND)
     For j = 1 To mND
         mCov(j) = 0: mCovG(j) = 0
         For i = 1 To mNP
-            If mPlan(i, j) = ST_WORK Or mPlan(i, j) = ST_FWORK Then
-                If mKind(i) = "薬剤師" Then mCov(j) = mCov(j) + 1
-                If mKind(i) = "事務員" Then mCovG(j) = mCovG(j) + 1
+            If Not mSkipRow(i) Then
+                If mPlan(i, j) = ST_WORK Or mPlan(i, j) = ST_FWORK Then
+                    If mKind(i) = KIND_PH Then mCov(j) = mCov(j) + 1
+                    If mKind(i) = KIND_CL Then mCovG(j) = mCovG(j) + 1
+                End If
             End If
         Next i
     Next j
+
     '=== 週N日ルール: 週ごとに勤務日数を絞る ===
     For i = 1 To mNP
+        If Not mSkipRow(i) Then
         If mRule(i) = "週N日" And Not mLeave(i) And pWeekN(i) > 0 Then
             ReDim processed(1 To mND)
             For j0 = 1 To mND
@@ -245,7 +374,9 @@ Public Sub シフト自動作成()
                 End If
             Next j0
         End If
+        End If
     Next i
+
     '=== 週リスト(日曜キー昇順) ===
     ReDim wkList(1 To mND): nW = 0
     For j = 1 To mND
@@ -257,10 +388,12 @@ Public Sub シフト自動作成()
             If Not exists Then nW = nW + 1: wkList(nW) = mWkKey(j)
         End If
     Next j
+
     '=== 通常ルール: 公休ノルマ先行(週(L9)休基本+余剰は連休化) ===
     ReDim remOff(1 To mNP)
     For i = 1 To mNP
         remOff(i) = 0
+        If Not mSkipRow(i) Then
         If mRule(i) = "通常" And Not mLeave(i) Then
             quota = pQuota(i): If quota < 0 Then quota = targetOff
             offN = 0
@@ -272,6 +405,7 @@ Public Sub シフト自動作成()
             Next j
             remOff(i) = quota - offN
             If remOff(i) < 0 Then remOff(i) = 0
+        End If
         End If
     Next i
     For i = 1 To mNP
@@ -336,6 +470,7 @@ Public Sub シフト自動作成()
             Next w
         End If
     Next i
+
     '=== 残りノルマ: 既存の休みに寄せて1日ずつ必ず配置(誤差0厳守) ===
     Do
         moved = False
@@ -360,44 +495,53 @@ Public Sub シフト自動作成()
             End If
         Next i
     Loop While moved
+
     '=== 連勤上限超えの緩和(入替) ===
     For guard = 1 To 3
         For i = 1 To mNP
-            If Not mLeave(i) Then RepairRuns i
+            If Not mSkipRow(i) And Not mLeave(i) Then RepairRuns i
         Next i
     Next guard
+
     '=== 医師5名日の出勤を均等化(誤差1以内を目標) ===
     FiveBalance
+
     '=== 記号割当 ===
     ReDim mSymb(1 To mNP, 1 To mND)
     ReDim mCntE(1 To mNP): ReDim mCntM(1 To mNP): ReDim mCntL(1 To mNP)
     For i = 1 To mNP
-        For j = 1 To mND
-            If mPlan(i, j) = ST_FWORK Then
-                v = Trim$(CStr(grid.Cells(i, j).Value))
-                If v = SYM_LATE Then mCntL(i) = mCntL(i) + 1
-                If v = SYM_MID Then mCntM(i) = mCntM(i) + 1
-                If v = SYM_EARLY Or v = "◯" Then mCntE(i) = mCntE(i) + 1
-            End If
-        Next j
+        If Not mSkipRow(i) Then
+            For j = 1 To mND
+                If mPlan(i, j) = ST_FWORK Then
+                    v = Trim$(CStr(grid.Cells(i, j).Value))
+                    If v = SYM_LATE Then mCntL(i) = mCntL(i) + 1
+                    If v = SYM_MID Then mCntM(i) = mCntM(i) + 1
+                    If v = SYM_EARLY Or v = "◯" Then mCntE(i) = mCntE(i) + 1
+                End If
+            Next j
+        End If
     Next i
     For j = 1 To mND
         If mDayIn(j) Then
             '--- 薬剤師: ○(L5人) → ▲最低人数(L6) → 残り●▲均等 ---
             needE = earlyN: dayL = 0: dayM = 0
             For i = 1 To mNP
-                If mKind(i) = "薬剤師" And mPlan(i, j) = ST_FWORK Then
+                If Not mSkipRow(i) Then
+                If mKind(i) = KIND_PH And mPlan(i, j) = ST_FWORK Then
                     v = Trim$(CStr(grid.Cells(i, j).Value))
                     If v = SYM_EARLY Or v = "◯" Then needE = needE - 1
                     If v = SYM_LATE Then dayL = dayL + 1
                     If v = SYM_MID Then dayM = dayM + 1
                 End If
+                End If
             Next i
             Do While needE > 0
                 bi = 0: bv = 32767
                 For i = 1 To mNP
-                    If mKind(i) = "薬剤師" And mPlan(i, j) = ST_WORK And Len(mSymb(i, j)) = 0 Then
+                    If Not mSkipRow(i) Then
+                    If mKind(i) = KIND_PH And mPlan(i, j) = ST_WORK And Len(mSymb(i, j)) = 0 Then
                         If mCntE(i) < bv Then bv = mCntE(i): bi = i
+                    End If
                     End If
                 Next i
                 If bi = 0 Then Exit Do
@@ -407,9 +551,11 @@ Public Sub シフト自動作成()
             Do While needL > 0
                 bi = 0: bv = 32767
                 For i = 1 To mNP
-                    If mKind(i) = "薬剤師" And mPlan(i, j) = ST_WORK _
+                    If Not mSkipRow(i) Then
+                    If mKind(i) = KIND_PH And mPlan(i, j) = ST_WORK _
                        And Len(mSymb(i, j)) = 0 And mCanLate(i) Then
                         If mCntL(i) < bv Then bv = mCntL(i): bi = i
+                    End If
                     End If
                 Next i
                 If bi = 0 Then Exit Do
@@ -420,13 +566,15 @@ Public Sub シフト自動作成()
                 If dayM <= dayL Then symS = SYM_MID Else symS = SYM_LATE
                 bi = 0: bv = 32767
                 For i = 1 To mNP
-                    If mKind(i) = "薬剤師" And mPlan(i, j) = ST_WORK _
+                    If Not mSkipRow(i) Then
+                    If mKind(i) = KIND_PH And mPlan(i, j) = ST_WORK _
                        And Len(mSymb(i, j)) = 0 And mCanLate(i) Then
                         If symS = SYM_MID Then
                             If mCntM(i) < bv Then bv = mCntM(i): bi = i
                         Else
                             If mCntL(i) < bv Then bv = mCntL(i): bi = i
                         End If
+                    End If
                     End If
                 Next i
                 If bi = 0 Then Exit Do
@@ -439,16 +587,20 @@ Public Sub シフト自動作成()
             '--- 事務員: ○(早番)は1日1人、2人目以降はL13の記号 ---
             gE = 0
             For i = 1 To mNP
-                If mKind(i) = "事務員" And mPlan(i, j) = ST_FWORK Then
+                If Not mSkipRow(i) Then
+                If mKind(i) = KIND_CL And mPlan(i, j) = ST_FWORK Then
                     v = Trim$(CStr(grid.Cells(i, j).Value))
                     If v = SYM_EARLY Or v = "◯" Then gE = gE + 1
+                End If
                 End If
             Next i
             Do
                 bi = 0: bv = 32767
                 For i = 1 To mNP
-                    If mKind(i) = "事務員" And mPlan(i, j) = ST_WORK And Len(mSymb(i, j)) = 0 Then
+                    If Not mSkipRow(i) Then
+                    If mKind(i) = KIND_CL And mPlan(i, j) = ST_WORK And Len(mSymb(i, j)) = 0 Then
                         If mCntE(i) < bv Then bv = mCntE(i): bi = i
+                    End If
                     End If
                 Next i
                 If bi = 0 Then Exit Do
@@ -461,14 +613,18 @@ Public Sub シフト自動作成()
             Loop
             '--- 残り(遅番不可の薬剤師など)は○ ---
             For i = 1 To mNP
+                If Not mSkipRow(i) Then
                 If mPlan(i, j) = ST_WORK And Len(mSymb(i, j)) = 0 Then
                     mSymb(i, j) = SYM_EARLY: mCntE(i) = mCntE(i) + 1
+                End If
                 End If
             Next i
         End If
     Next j
+
     '=== ○●▲の個人差を均等化(誤差2以内を目標・同日交換) ===
     SymbolBalance
+
     '=== 書き込み(差分ログを記録しながら) ===
     Set lg = GetLogSheet()
     sess = NextSession(lg)
@@ -477,33 +633,41 @@ Public Sub シフト自動作成()
     Application.EnableEvents = False
     Application.ScreenUpdating = False
     For i = 1 To mNP
-        For j = 1 To mND
-            tv = ""
-            If mPlan(i, j) = ST_OFF Then
-                tv = SYM_OFF
-            ElseIf mPlan(i, j) = ST_WORK Then
-                tv = mSymb(i, j)
-            End If
-            If Len(tv) > 0 Then
-                Set cCell = grid.Cells(i, j)
-                If Not cCell.HasFormula Then
-                    If Trim$(CStr(cCell.Value)) <> tv Then
-                        LogChange lg, lgR, sess, "自動作成", cCell, tv
-                        logged = logged + 1
-                    End If
+        If Not mSkipRow(i) Then          ' 空行・集計行には一切書き込まない
+            For j = 1 To mND
+                tv = ""
+                If mPlan(i, j) = ST_OFF Then
+                    tv = SYM_OFF
+                ElseIf mPlan(i, j) = ST_WORK Then
+                    tv = mSymb(i, j)
                 End If
-                StampCell ws, cCell, tv
-                written = written + 1
-            End If
-        Next j
+                If Len(tv) > 0 Then
+                    Set cCell = grid.Cells(i, j)
+                    If Not cCell.HasFormula Then
+                        If Trim$(CStr(cCell.Value)) <> tv Then
+                            LogChange lg, lgR, sess, "自動作成", cCell, tv
+                            logged = logged + 1
+                        End If
+                    End If
+                    StampCell ws, cCell, tv
+                    written = written + 1
+                End If
+            Next j
+        End If
     Next i
     Application.ScreenUpdating = True
     Application.EnableEvents = True
+
     '=== 結果レポート ===
     msg = "対象月: " & Format(ws.Range("A1").Value, "yyyy年m月") & _
-          "　公休ノルマ(土日祝): " & targetOff & "日　書込セル: " & written & vbCrLf & vbCrLf
+          "　公休ノルマ(土日祝): " & targetOff & "日　書込セル: " & written & vbCrLf & _
+          "入力範囲: " & grid.Address(False, False) & vbCrLf & _
+          "対象者: " & activeN & "名" & _
+          IIf(skipN > 0, "　(スキップ行: " & skipN & "行)", "") & vbCrLf & vbCrLf
     For i = 1 To mNP
-        If mLeave(i) Then
+        If mSkipRow(i) Then
+            ' 空行・集計行は結果に出さない
+        ElseIf mLeave(i) Then
             msg = msg & pName(i) & " : 休業(スキップ)" & vbCrLf
         Else
             offC = 0: wC = 0: paidC = 0
@@ -520,7 +684,7 @@ Public Sub シフト自動作成()
             msg = msg & pName(i) & " : 出勤" & wC & " 休" & offC & _
                   IIf(paidC > 0, "(うちノルマ外" & paidC & ")", "") & _
                   " 連勤max" & MaxRun(i) & " 連休max" & MaxOffRun(i) & _
-                  IIf(mKind(i) = "薬剤師", " 医5日" & FiveCnt(i) & _
+                  IIf(mKind(i) = KIND_PH, " 医5日" & FiveCnt(i) & _
                       " ○" & mCntE(i) & " ●" & mCntM(i) & " ▲" & mCntL(i), "") & vbCrLf
         End If
     Next i
@@ -539,12 +703,14 @@ Public Sub シフト自動作成()
         If mDayIn(j) Then
             dayLateN = 0
             For i = 1 To mNP
-                If mKind(i) = "薬剤師" Then
+                If Not mSkipRow(i) Then
+                If mKind(i) = KIND_PH Then
                     If mPlan(i, j) = ST_WORK Then
                         If mSymb(i, j) = SYM_LATE Then dayLateN = dayLateN + 1
                     ElseIf mPlan(i, j) = ST_FWORK Then
                         If Trim$(CStr(grid.Cells(i, j).Value)) = SYM_LATE Then dayLateN = dayLateN + 1
                     End If
+                End If
                 End If
             Next i
             If dayLateN < lateMin Then lateShort = lateShort + 1
@@ -566,13 +732,103 @@ Public Sub シフト自動作成()
         msg = msg & vbCrLf & "※必要数(医師数+" & reqPlus & ")に届かない日: " & shortN & "日(最大不足" & worst & "名)" & vbCrLf & _
               "　→ 公休ノルマ優先のため。日別は過不足行で確認できます。" & vbCrLf
     End If
-    If Len(missing) > 0 Then msg = msg & vbCrLf & "設定未登録(既定値で処理): " & missing
+    If Len(missing) > 0 Then msg = msg & vbCrLf & "設定未登録(既定値で処理):" & vbCrLf & missing
+    If Len(orphan) > 0 Then msg = msg & vbCrLf & "マスタにあるがシフト表に無い:" & vbCrLf & orphan
     msg = msg & vbCrLf & "変更ログ: セッション#" & sess & " に " & logged & "セル記録。" & vbCrLf & _
           "取り消すには「シフト変更を戻す」を実行してください。"
     MsgBox msg, vbInformation, "シフト自動作成 結果"
 End Sub
+
 '==================================================================
-' 差分ログ・戻す・白紙化(v6.5.0 追加)
+' レイアウト整合性チェック(単体実行用)
+'   実行せずに、シフト表とマスタの対応だけを確認できます
+'==================================================================
+Public Sub シフト設定チェック()
+    Dim ws As Worksheet, cfg As Worksheet, grid As Range
+    Dim i As Long, r As Long, nm As String, kd As String
+    Dim nmList() As String, nN As Long, ii As Long, hit As Long
+    Dim missing As String, orphan As String, dupName As String, badKind As String
+    Dim blankRows As String, labelRows As String, msg As String
+    Dim mres As Variant, docRow As Long, warnRange As String
+    Set ws = Worksheets("シフト")
+    On Error Resume Next
+    Set cfg = Worksheets(CFG_SHEET)
+    On Error GoTo 0
+    If cfg Is Nothing Then
+        MsgBox "設定シート「" & CFG_SHEET & "」がありません。", vbExclamation: Exit Sub
+    End If
+    Set grid = AutoShiftRange(ws)
+    '--- 範囲が集計行に近すぎないか(下端は医師数の2行上まで) ---
+    mres = Application.Match(DOC_LABEL, ws.Columns(1), 0)
+    If Not IsError(mres) Then
+        docRow = CLng(mres)
+        If grid.Row + grid.Rows.Count - 1 > docRow - DOC_GAP Then
+            warnRange = "■ 入力範囲が「" & DOC_LABEL & "」行(" & docRow & "行)の" & _
+                        DOC_GAP & "行上を超えています" & vbCrLf & _
+                        "　終端は " & (docRow - DOC_GAP) & "行 が正しい位置です" & vbCrLf & vbCrLf
+        End If
+    End If
+    ReDim nmList(1 To grid.Rows.Count): nN = 0
+    For i = 1 To grid.Rows.Count
+        nm = Trim$(CStr(ws.Cells(grid.Row + i - 1, 1).Value))
+        If Len(nm) = 0 Then
+            blankRows = blankRows & IIf(Len(blankRows) > 0, ", ", "") & (grid.Row + i - 1) & "行"
+        ElseIf IsNonName(nm) Then
+            labelRows = labelRows & IIf(Len(labelRows) > 0, ", ", "") & _
+                        (grid.Row + i - 1) & "行(" & nm & ")"
+        Else
+            nN = nN + 1: nmList(nN) = nm
+            For ii = 1 To nN - 1
+                If nmList(ii) = nm Then
+                    If InStr(dupName, "・" & nm & vbCrLf) = 0 Then dupName = dupName & "・" & nm & vbCrLf
+                End If
+            Next ii
+            hit = 0: kd = ""
+            r = 5
+            Do While Len(Trim$(CStr(cfg.Cells(r, 1).Value))) > 0
+                If Trim$(CStr(cfg.Cells(r, 1).Value)) = nm Then
+                    hit = 1: kd = Trim$(CStr(cfg.Cells(r, 2).Value)): Exit Do
+                End If
+                r = r + 1
+            Loop
+            If hit = 0 Then
+                missing = missing & "・" & nm & vbCrLf
+            ElseIf Len(kd) > 0 And kd <> KIND_PH And kd <> KIND_CL Then
+                badKind = badKind & "・" & nm & " : 区分「" & kd & "」" & vbCrLf
+            End If
+        End If
+    Next i
+    r = 5
+    Do While Len(Trim$(CStr(cfg.Cells(r, 1).Value))) > 0
+        nm = Trim$(CStr(cfg.Cells(r, 1).Value))
+        If Not IsNonName(nm) Then
+            hit = 0
+            For ii = 1 To nN
+                If nmList(ii) = nm Then hit = 1: Exit For
+            Next ii
+            If hit = 0 Then orphan = orphan & "・" & nm & vbCrLf
+        End If
+        r = r + 1
+    Loop
+    msg = "シフト入力範囲 : " & grid.Address(False, False) & vbCrLf & _
+          "　(上端=日付行の1行下 / 下端=" & DOC_LABEL & "の" & DOC_GAP & "行上)" & vbCrLf & _
+          "対象者(氏名有) : " & nN & "名" & vbCrLf & _
+          "空行(スキップ) : " & IIf(Len(blankRows) > 0, blankRows, "なし") & vbCrLf & _
+          "集計行(除外)   : " & IIf(Len(labelRows) > 0, labelRows, "なし") & vbCrLf & vbCrLf
+    msg = msg & warnRange
+    If Len(dupName) > 0 Then msg = msg & "■ 氏名の重複" & vbCrLf & dupName & vbCrLf
+    If Len(badKind) > 0 Then msg = msg & "■ 区分が「" & KIND_PH & "」「" & KIND_CL & "」以外" & vbCrLf & badKind & vbCrLf
+    If Len(missing) > 0 Then msg = msg & "■ マスタ未登録(シフト表にあるが設定が無い)" & vbCrLf & missing & vbCrLf
+    If Len(orphan) > 0 Then msg = msg & "■ 孤児(マスタにあるがシフト表に無い)" & vbCrLf & orphan & vbCrLf
+    If Len(warnRange) = 0 And Len(dupName) = 0 And Len(badKind) = 0 _
+       And Len(missing) = 0 And Len(orphan) = 0 Then
+        msg = msg & "整合性の問題は見つかりませんでした。"
+    End If
+    MsgBox msg, vbInformation, "シフト設定チェック"
+End Sub
+
+'==================================================================
+' 差分ログ・戻す・白紙化
 '==================================================================
 '--- ログシート取得(無ければ作成) ---
 Private Function GetLogSheet() As Worksheet
@@ -714,6 +970,7 @@ Public Sub シフト白紙化()
                "元に戻すには「シフト変更を戻す」を実行してください。", vbInformation
     End If
 End Sub
+
 '==================================================================
 ' 設定シートの自動生成
 '==================================================================
@@ -723,33 +980,30 @@ Private Function BuildCfgSheet(ByVal ws As Worksheet) As Worksheet
     Set grid = AutoShiftRange(ws)
     Set cfg = Worksheets.Add(After:=Worksheets(Worksheets.Count))
     cfg.Name = CFG_SHEET
-
     cfg.Range("A1").Value = "シフト自動作成 設定"
     cfg.Range("A1").Font.Bold = True: cfg.Range("A1").Font.size = 14
     cfg.Range("A2").Value = "希望休はシフト表に「希休」スタンプで入力してください。実行時、入力済みのセルはすべて保持され、空白セルのみ自動で埋まります。"
-    cfg.Range("A3").Value = "派遣スタッフの行をシフト表に追加したら、この表にも氏名を追加し「勤務ルール=手動」を設定してください。"
+    cfg.Range("A3").Value = "氏名はシフト表A列と完全一致させ、直接入力してください(数式は使わないこと)。この表の行順は自由・シフト表の空行と集計行は自動でスキップされます。派遣スタッフは「勤務ルール=手動」を設定してください。"
     cfg.Range("A2:A3").Font.Italic = True
     cfg.Range("A2:A3").Font.size = 9
     cfg.Range("A2:A3").Font.Color = RGB(128, 128, 128)
-
     '--- メンバー表ヘッダー(4行目) ---
     cfg.Range("A4:I4").Value = Array("氏名", "区分", "休業(○=休業中)", "勤務ルール", _
         "固定曜日(例:月火金土)", "週勤務日数", "月間休日数(空欄=土日祝と同数)", _
         "遅番・遅半 可否", "備考")
-
-    '--- メンバー行: シフト表A列から氏名を取込、既定値を設定 ---
+    '--- メンバー行: シフト表A列から氏名を取込(空行・集計行は飛ばす) ---
     r = 5
     For i = 1 To grid.Rows.Count
         nm = Trim$(CStr(ws.Cells(grid.Row + i - 1, 1).Value))
-        If Len(nm) > 0 Then
+        If Len(nm) > 0 And Not IsNonName(nm) Then
+            cfg.Cells(r, 1).NumberFormat = "@"
             cfg.Cells(r, 1).Value = nm
-            cfg.Cells(r, 2).Value = "薬剤師"   ' 事務員は手動で変更
+            cfg.Cells(r, 2).Value = KIND_PH    ' 事務員は手動で変更
             cfg.Cells(r, 4).Value = "通常"
             cfg.Cells(r, 8).Value = "可"
             r = r + 1
         End If
     Next i
-
     '--- 全体設定(K列ラベル / L列値) ---
     cfg.Range("K4").Value = "全体設定(自動作成ルール)": cfg.Range("L4").Value = "値"
     cfg.Range("K5:L13").Value = Application.Transpose(Application.Transpose(Array( _
@@ -762,13 +1016,12 @@ Private Function BuildCfgSheet(ByVal ws As Worksheet) As Worksheet
         Array("ノルマ外の休み記号(カンマ区切り)", "有休"), _
         Array("週の定義(固定)", "日曜始まり・土曜終わり"), _
         Array("事務員の2人目の記号(○は1日1人)", "●"))))
-
     cfg.Range("A4:I4,K4:L4").Font.Bold = True
     cfg.Range("A4:I4,K4:L4").Interior.Color = RGB(217, 217, 217)
     cfg.Columns("A:L").AutoFit
-
     Set BuildCfgSheet = cfg
 End Function
+
 '==================================================================
 ' 設定読込ヘルパー(K列ラベルの部分一致 → L列の値)
 '==================================================================
@@ -798,14 +1051,16 @@ Private Function CfgTxt(ByVal cfg As Worksheet, ByVal key As String, ByVal dft A
     Next r
     CfgTxt = dft
 End Function
+
 '==================================================================
 ' スコアリング・配置ヘルパー
 '==================================================================
 '--- 予定出勤数の更新(薬剤師/事務員 別) ---
 Private Sub CovAdd(ByVal i As Long, ByVal j As Long, ByVal d As Long)
-    If mKind(i) = "薬剤師" Then
+    If mSkipRow(i) Then Exit Sub
+    If mKind(i) = KIND_PH Then
         mCov(j) = mCov(j) + d
-    ElseIf mKind(i) = "事務員" Then
+    ElseIf mKind(i) = KIND_CL Then
         mCovG(j) = mCovG(j) + d
     End If
 End Sub
@@ -822,10 +1077,10 @@ End Function
 '--- その日を休みにする良さ(大きいほど休み向き) ---
 Private Function OffScore(ByVal i As Long, ByVal j As Long) As Double
     Dim s As Double, L As Long, lft As Long, rgt As Long
-    If mKind(i) = "薬剤師" Then
+    If mKind(i) = KIND_PH Then
         s = s + 5# * (mCov(j) - 1 - mDayReq(j))          ' 不足を日別に均す(ソフト)
         If mDayDoc(j) = 5 Then s = s + 3# * (FiveCnt(i) - FiveAvg())
-    ElseIf mKind(i) = "事務員" Then
+    ElseIf mKind(i) = KIND_CL Then
         If mCovG(j) - 1 < 1 Then
             s = s - 12                                    ' 事務員ゼロの日は強く回避
         Else
@@ -918,8 +1173,8 @@ Private Sub RepairRuns(ByVal i As Long)
                         If mPlan(i, k) = ST_OFF Then
                             If WorkRunIf(i, k) <= mMaxRun Then
                                 sc = 0
-                                If mKind(i) = "薬剤師" Then sc = mDayReq(k) - mCov(k)
-                                If mKind(i) = "事務員" Then sc = 1 - mCovG(k)
+                                If mKind(i) = KIND_PH Then sc = mDayReq(k) - mCov(k)
+                                If mKind(i) = KIND_CL Then sc = 1 - mCovG(k)
                                 If sc > bs Then bs = sc: bk = k
                             End If
                         End If
@@ -946,10 +1201,12 @@ Private Sub FiveBalance()
     For pass = 1 To 100
         mxI = 0: mnI = 0: mxV = -1: mnV = 32767
         For i = 1 To mNP
-            If mKind(i) = "薬剤師" And Not mLeave(i) And mRule(i) = "通常" Then
+            If Not mSkipRow(i) Then
+            If mKind(i) = KIND_PH And Not mLeave(i) And mRule(i) = "通常" Then
                 f = FiveCnt(i)
                 If f > mxV Then mxV = f: mxI = i
                 If f < mnV Then mnV = f: mnI = i
+            End If
             End If
         Next i
         If mxI = 0 Or mnI = 0 Or mxI = mnI Then Exit Sub
@@ -999,12 +1256,14 @@ Private Sub SymbolBalance()
             sym = Choose(s, SYM_EARLY, SYM_MID, SYM_LATE)
             mxI = 0: mnI = 0: mxV = -1: mnV = 32767
             For i = 1 To mNP
-                If mKind(i) = "薬剤師" And Not mLeave(i) And mRule(i) <> "手動" Then
+                If Not mSkipRow(i) Then
+                If mKind(i) = KIND_PH And Not mLeave(i) And mRule(i) <> "手動" Then
                     If sym = SYM_EARLY Or mCanLate(i) Then
                         c = SymCnt(i, sym)
                         If c > mxV Then mxV = c: mxI = i
                         If c < mnV Then mnV = c: mnI = i
                     End If
+                End If
                 End If
             Next i
             If mxI > 0 And mnI > 0 And mxI <> mnI And mxV - mnV > 2 Then
@@ -1037,6 +1296,7 @@ Private Sub AddCnt(ByVal i As Long, ByVal sym As String, ByVal d As Long)
     If sym = SYM_MID Then mCntM(i) = mCntM(i) + d
     If sym = SYM_LATE Then mCntL(i) = mCntL(i) + d
 End Sub
+
 '==================================================================
 ' 計測ヘルパー
 '==================================================================
@@ -1096,8 +1356,10 @@ End Function
 Private Function FiveAvg() As Double
     Dim i As Long, t As Long, c As Long
     For i = 1 To mNP
-        If mKind(i) = "薬剤師" And Not mLeave(i) Then
+        If Not mSkipRow(i) Then
+        If mKind(i) = KIND_PH And Not mLeave(i) Then
             t = t + FiveCnt(i): c = c + 1
+        End If
         End If
     Next i
     If c > 0 Then FiveAvg = t / c
@@ -1124,6 +1386,7 @@ Private Function MaxOffRun(ByVal i As Long) As Long
         End If
     Next j
 End Function
+
 '==================================================================
 ' 共通ヘルパー(動的範囲・スタンプ)
 '==================================================================
@@ -1131,13 +1394,13 @@ Private Function AutoShiftRange(ByVal ws As Worksheet) As Range
     On Error Resume Next
     Set AutoShiftRange = ws.Parent.Names("シフトパレット範囲").RefersToRange
     On Error GoTo 0
-    If AutoShiftRange Is Nothing Then Set AutoShiftRange = ws.Range("B13:AF22")
+    If AutoShiftRange Is Nothing Then Set AutoShiftRange = ws.Range(FB_SHIFT)
 End Function
 Private Function AutoPaletteRange(ByVal ws As Worksheet) As Range
     On Error Resume Next
     Set AutoPaletteRange = ws.Parent.Names("シフトパレット").RefersToRange
     On Error GoTo 0
-    If AutoPaletteRange Is Nothing Then Set AutoPaletteRange = ws.Range("B28:M28")
+    If AutoPaletteRange Is Nothing Then Set AutoPaletteRange = ws.Range(FB_PALETTE)
 End Function
 Private Sub StampCell(ByVal ws As Worksheet, ByVal c As Range, ByVal v As String)
     Dim pal As Range, i As Long, src As Range
@@ -1195,7 +1458,6 @@ Public Sub LogManualSession(ByVal addrs As Variant, ByVal oldVals As Variant, _
         End If
     Next k
 End Sub
-
 '--- ログ全消去(期替わり用リセット) ---
 Public Sub シフトログリセット(Optional ByVal ask As Boolean = True)
     Dim lg As Worksheet, lr As Long
@@ -1212,5 +1474,3 @@ Public Sub シフトログリセット(Optional ByVal ask As Boolean = True)
     End If
     lg.Rows("2:" & lr).Delete
 End Sub
-
-

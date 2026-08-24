@@ -1,0 +1,333 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<title>くるむ薬局札幌店 シフト表 操作マニュアル</title>
+<style>
+  body{font-family:"Yu Gothic","Meiryo",sans-serif;line-height:1.8;color:#222;
+       max-width:900px;margin:0 auto;padding:32px 24px;background:#fff}
+  h1{font-size:24px;border-bottom:4px solid #2c5f8a;padding-bottom:10px;margin-bottom:4px}
+  .sub{color:#777;font-size:13px;margin-bottom:32px}
+  h2{font-size:19px;background:#2c5f8a;color:#fff;padding:8px 14px;margin-top:40px;border-radius:3px}
+  h3{font-size:16px;color:#2c5f8a;border-left:5px solid #2c5f8a;padding-left:10px;margin-top:28px}
+  table{border-collapse:collapse;width:100%;margin:14px 0;font-size:13px}
+  th,td{border:1px solid #ccc;padding:7px 9px;text-align:left;vertical-align:top}
+  th{background:#eef3f8;font-weight:bold}
+  td.c{text-align:center;white-space:nowrap}
+  .warn{background:#fff8e1;border-left:5px solid #f0ad4e;padding:12px 16px;margin:16px 0;border-radius:3px}
+  .info{background:#e8f4fd;border-left:5px solid #2c5f8a;padding:12px 16px;margin:16px 0;border-radius:3px}
+  .danger{background:#fdecea;border-left:5px solid #d9534f;padding:12px 16px;margin:16px 0;border-radius:3px}
+  code{background:#f3f3f3;padding:2px 6px;border-radius:3px;font-family:Consolas,monospace;font-size:12px}
+  .macro{background:#2c5f8a;color:#fff;padding:2px 9px;border-radius:12px;font-size:12px;
+         font-weight:bold;white-space:nowrap;display:inline-block}
+  .flow{background:#f8f9fa;border:1px solid #ddd;padding:18px;font-family:Consolas,monospace;
+        font-size:12px;line-height:1.7;white-space:pre;overflow-x:auto;border-radius:4px}
+  .step{background:#2c5f8a;color:#fff;padding:3px 11px;border-radius:14px;font-size:13px;
+        font-weight:bold;margin-right:8px;display:inline-block}
+  ul,ol{padding-left:26px}
+  li{margin:6px 0}
+  .sym{font-size:17px;font-weight:bold}
+  footer{margin-top:48px;padding-top:14px;border-top:1px solid #ddd;color:#888;font-size:12px}
+  @media print{body{padding:0}h2{-webkit-print-color-adjust:exact;print-color-adjust:exact}}
+</style>
+</head>
+<body>
+
+<h1>くるむ薬局札幌店　シフト表 操作マニュアル</h1>
+<p class="sub">対象ファイル: くるむ薬局_シフト_自動集計版.xlsm　/　ShiftAuto v7.2.0・ShiftClick v8.2　/　2026-08-24</p>
+
+<div class="info">
+<strong>このシステムでできること</strong><br>
+希望休や確定シフトを手入力し、残りの空白セルを自動で埋めます。手で入力したセルは自動生成で<strong>上書きされません</strong>。生成結果は全てログに記録され、いつでも元に戻せます。
+</div>
+
+<h2>1. シート構成</h2>
+<table>
+<tr><th style="width:150px">シート名</th><th>役割</th></tr>
+<tr><td><code>シフト</code></td><td>メイン。日付・氏名・シフト記号・集計行・入力パレット</td></tr>
+<tr><td><code>自動作成設定</code></td><td>メンバーごとの勤務条件（マスタ）と全体ルール</td></tr>
+<tr><td><code>祝日マスタ</code></td><td>国民の祝日一覧（公休ノルマの算出に使用）</td></tr>
+<tr><td><code>シフト変更ログ</code></td><td>変更履歴。「シフト変更を戻す」の復元元データ</td></tr>
+</table>
+
+<h3>シフトシートの行構成</h3>
+<table>
+<tr><th style="width:110px">位置</th><th>内容</th></tr>
+<tr><td class="c">A1</td><td>対象月の日付（この月のシフトを作成します）。<strong>変更するとログのリセット確認</strong>が出ます（期替わり）</td></tr>
+<tr><td class="c">4〜8行</td><td>医師名（出勤する医師を記入 → 医師数に自動反映）</td></tr>
+<tr><td class="c">10行</td><td>日付行</td></tr>
+<tr><td class="c">11〜25行</td><td><strong>シフト入力欄</strong>（A列に氏名、各日にシフト記号）</td></tr>
+<tr><td class="c">26行</td><td><strong>緩衝行</strong>（入力欄の外。行追加ののりしろ。ここには入力しません）</td></tr>
+<tr><td class="c">27行</td><td><code>医師数(診)</code>　その日の医師数（自動計算）</td></tr>
+<tr><td class="c">28行</td><td><code>薬剤師出勤数</code>　その日の薬剤師の出勤数（自動計算）</td></tr>
+<tr><td class="c">29行</td><td><code>過不足</code>　<strong>出勤数 − 必要数</strong>。マイナスは人員不足</td></tr>
+<tr><td class="c">30〜32行</td><td>★マーカー行 / パレット本体 / ラベル行</td></tr>
+</table>
+
+<div class="info">
+<strong>入力欄の範囲ルール（v7.2.0）</strong><br>
+・上端 = <strong>日付行（10行）の1行下</strong><br>
+・下端 = <strong><code>医師数(診)</code> の2行上</strong>　←1行上は緩衝行なので入力欄に含めません<br><br>
+入力欄の範囲・パレットの位置は<strong>自動追従</strong>します。入力欄の内側に行を挿入しても、空行を追加しても、範囲指定を直す必要はありません。
+</div>
+
+<div class="warn">
+<strong>行を増やして緩衝行が埋まってしまったら</strong> 名前付き範囲「シフトパレット範囲」の終端を <code>医師数(診)</code> の2行上に直してください。数式で自動追従させる場合は次の定義を使います。
+<div class="flow">=INDEX(シフト!$B:$B,ROW(シフト!$B$10)+1)
+ :INDEX(シフト!$AF:$AF,MATCH("医師数*",シフト!$A:$A,0)-2)</div>
+ずれている場合は <span class="macro">シフト自動作成</span> と <span class="macro">シフト設定チェック</span> が警告を出します。
+</div>
+
+<h2>2. シフトパレットの使い方</h2>
+<p>シフトシート下部の横一列がパレットです。<strong>クリックでモードを選び、入力欄をダブルクリックで押す</strong>のが基本操作です。</p>
+
+<table>
+<tr><th style="width:80px">セル</th><th style="width:110px">ラベル</th><th>動作</th></tr>
+<tr><td class="c">OFF</td><td>停止</td><td>マクロを止め、通常のExcel操作に戻す</td></tr>
+<tr><td class="c">切替</td><td>順送り</td><td>ダブルクリックで記号を順送り／右クリックで逆送り</td></tr>
+<tr><td class="c">色消</td><td>背景消</td><td>ダブルクリックしたセルの背景色を消す</td></tr>
+<tr><td class="c">（空白）</td><td>消去</td><td>ダブルクリックしたセルを空白にする</td></tr>
+<tr><td class="c"><span class="sym">○</span></td><td>早番</td><td rowspan="3">選んだ記号をダブルクリックで押す<br>範囲を選んで右クリックでまとめ押し</td></tr>
+<tr><td class="c"><span class="sym">●</span></td><td>遅半</td></tr>
+<tr><td class="c"><span class="sym">▲</span></td><td>遅番</td></tr>
+<tr><td class="c">公休</td><td>公休</td><td rowspan="6">同上（休みの種類）</td></tr>
+<tr><td class="c">希休</td><td>希休（希望休）</td></tr>
+<tr><td class="c">夏休</td><td>夏休</td></tr>
+<tr><td class="c">有休</td><td>有休</td></tr>
+<tr><td class="c">有休※</td><td>備考付</td></tr>
+<tr><td class="c">銀行</td><td>銀行</td></tr>
+</table>
+
+<p><strong>選択中のモードは★マーカー</strong>（パレットの上の行）と、Excel下部のステータスバーに表示されます。</p>
+
+<h3>パレットの操作マクロ</h3>
+<table>
+<tr><th style="width:220px">マクロ名</th><th>用途</th></tr>
+<tr><td><span class="macro">ShiftClick_パターン追加</span></td><td>パレット右端に新しい記号を追加（記号とラベルを入力）</td></tr>
+<tr><td><span class="macro">ShiftClick_パレット作成</span></td><td>パレットを既定内容で作り直す（<code>過不足</code> 行の下に自動配置。見出しはマーカー行の左に入ります）</td></tr>
+<tr><td><span class="macro">ShiftClick_連続切替に戻す</span></td><td>モードを「切替」に戻す</td></tr>
+<tr><td><span class="macro">ShiftClick_選択範囲にスタンプ</span></td><td>選択範囲に現在の記号をまとめて押す</td></tr>
+<tr><td><span class="macro">ShiftClick_セルフチェック</span></td><td>範囲設定が正しいか確認（トラブル時）。<strong>入力範囲の下端が正しい位置か</strong>も判定します</td></tr>
+</table>
+
+<div class="warn">
+<strong>記号を追加したら</strong> パレットのセルに文字色・背景色を付けておくと、スタンプ時にその書式もコピーされます。色分けしたい記号は先に着色してください。
+</div>
+
+<h2>3. 作成フロー（全体像）</h2>
+
+<div class="flow">STEP 0   マスタ整備（月初・メンバー変更時のみ）
+            │
+            ├─→ シフト設定チェック ──→ 警告あり？ ──Yes──→ マスタ修正へ戻る
+            │                                  │No
+STEP 0-2 医師数の入力                          │
+            ↓                                  ↓
+┌──────────── 入力フェーズ（人が決める）────────────┐
+│ STEP 1  希望休・有休を入力                        │
+│ STEP 2  派遣・単発スタッフの出勤を入力            │  ← 入力済みセルは
+│ STEP 3  確定シフトを先付け                        │    上書きされません
+└───────────────────────────────────────────────────┘
+            ↓
+STEP 4   シフト自動作成 ───→ 空白セルのみを埋める
+            ↓
+STEP 5   結果レポートを確認 ──→ 問題あり？ ──Yes──→ シフト変更を戻す
+            ↓                                          または STEP 6-7
+STEP 6   過不足行で日別チェック
+            ↓
+STEP 7   手修正で仕上げ
+            ↓
+          完成</div>
+
+<h2>4. 手順の詳細</h2>
+
+<h3><span class="step">STEP 0</span>マスタ整備</h3>
+<p><code>自動作成設定</code> シートの4行目以降で各人の条件を設定します。</p>
+<table>
+<tr><th style="width:150px">列</th><th>入力内容</th></tr>
+<tr><td>氏名</td><td><strong>シフト表A列と完全一致</strong>させる（全角/半角の違いも不一致になります）</td></tr>
+<tr><td>区分</td><td><code>薬剤師</code> または <code>事務員</code>（この2つ以外は人数計算に入りません）</td></tr>
+<tr><td>休業(○=休業中)</td><td>○を入れるとその月は完全にスキップ（産休・退職等）</td></tr>
+<tr><td>勤務ルール</td><td><code>通常</code>／<code>固定曜日</code>／<code>週N日</code>／<code>手動</code></td></tr>
+<tr><td>固定曜日</td><td>ルールが「固定曜日」の場合に <code>月火金土</code> のように記入</td></tr>
+<tr><td>週勤務日数</td><td>ルールが「週N日」の場合に日数を記入</td></tr>
+<tr><td>月間休日数</td><td>空欄なら土日祝と同数。個別に指定する場合のみ記入</td></tr>
+<tr><td>遅番・遅半 可否</td><td><code>不可</code> と書くと ▲ ● が割り当てられません</td></tr>
+</table>
+
+<p><strong>勤務ルールの違い</strong></p>
+<table>
+<tr><th style="width:110px">ルール</th><th>動作</th><th style="width:180px">向いている人</th></tr>
+<tr><td><code>通常</code></td><td>公休ノルマ分を自動配置し、残りを出勤に</td><td>常勤スタッフ</td></tr>
+<tr><td><code>固定曜日</code></td><td>指定曜日のみ出勤、他は公休</td><td>曜日固定のパート</td></tr>
+<tr><td><code>週N日</code></td><td>週あたりの勤務日数を上限まで絞る</td><td>週4日勤務など</td></tr>
+<tr><td><code>手動</code></td><td><strong>自動配置しない</strong>（空白のまま）</td><td>派遣・単発スタッフ</td></tr>
+</table>
+
+<p>設定後、<span class="macro">シフト設定チェック</span> を実行して警告がゼロか確認してください。</p>
+<table>
+<tr><th style="width:170px">警告</th><th>意味と対処</th></tr>
+<tr><td>入力範囲が下すぎる</td><td>範囲の下端が <code>医師数(診)</code> の2行上を超えている。名前付き範囲「シフトパレット範囲」の終端を直す</td></tr>
+<tr><td>氏名の重複</td><td>同名が2行ある。先に見つかった設定だけが適用されるため、区別できる氏名に変更</td></tr>
+<tr><td>区分が対象外</td><td>「薬剤師」「事務員」以外。出勤数に計上されないので修正</td></tr>
+<tr><td>マスタ未登録</td><td>シフト表にあるがマスタに無い。既定値（薬剤師・通常・遅番可）で処理されます</td></tr>
+<tr><td>孤児</td><td>マスタにあるがシフト表に無い。行削除や氏名変更の取り残し</td></tr>
+</table>
+
+<h3><span class="step">STEP 0-2</span>医師数の入力</h3>
+<p>4〜8行に出勤する医師名を記入すると <code>医師数(診)</code> 行に自動集計されます。<br>
+<strong>必要出勤数 = 医師数 + 1</strong>（設定シート L10 で変更可）</p>
+
+<h3><span class="step">STEP 1</span>希望休・有休の入力</h3>
+<p>パレットで <code>希休</code> <code>有休</code> <code>夏休</code> を選び、該当セルをダブルクリック。</p>
+<div class="info">
+<strong>有休は公休ノルマの外です。</strong> 設定シート L11「ノルマ外の休み記号」に指定された記号（既定=有休）は公休ノルマに数えられず、公休が別途その分配置されます。つまり有休を取った分だけ月の休みが増えます。
+</div>
+
+<h3><span class="step">STEP 2</span>派遣・単発スタッフの入力</h3>
+<p>マスタで <code>勤務ルール = 手動</code> の人は自動配置されません。出勤日を手で入力してください。<br>
+入力した出勤は<strong>必要人数の計算に反映</strong>されるため、過不足行が正しくなります。</p>
+
+<h3><span class="step">STEP 3</span>確定シフトの先付け</h3>
+<p>「この日はこの人」が決まっている分を先に入力します。記号（○●▲）で入れれば出勤確定、<code>公休</code> で入れれば休み確定として扱われます。</p>
+<div class="warn">
+<strong>入れすぎに注意。</strong> 手入力を増やすほど自動配置の自由度が下がり、公休ノルマ未達や人員不足の日が増えます。必要な分だけ先付けしてください。
+</div>
+
+<h3><span class="step">STEP 4</span>シフト自動作成を実行</h3>
+<p><span class="macro">シフト自動作成</span> を実行します。内部の処理順序は次の通りです。</p>
+<table>
+<tr><th style="width:40px">順</th><th style="width:210px">処理</th><th>内容</th></tr>
+<tr><td class="c">1</td><td>整合性チェック</td><td>入力範囲の位置と氏名の不整合を確認。問題があれば確認ダイアログ（中止できます）</td></tr>
+<tr><td class="c">2</td><td>空行・集計行スキップ</td><td>氏名が空の行に加え、<code>医師数</code> <code>薬剤師出勤数</code> <code>事務員出勤数</code> <code>過不足</code> <code>合計</code> <code>シフトパレット</code> で始まる行も氏名として扱いません（v7.1.0）</td></tr>
+<tr><td class="c">3</td><td>既存入力の保護</td><td>入力済みセルを「出勤確定」「休み確定」に分類</td></tr>
+<tr><td class="c">4</td><td>勤務ルール適用</td><td>固定曜日・週N日・手動・通常に応じて仮配置</td></tr>
+<tr><td class="c">5</td><td>週N日の絞り込み</td><td>週あたり勤務日数を上限まで削る</td></tr>
+<tr><td class="c">6</td><td><strong>公休ノルマ配置</strong></td><td>土日祝と同数を<strong>誤差0で厳守</strong>。週2休基本＋余剰は2〜3連休に</td></tr>
+<tr><td class="c">7</td><td>連勤上限の緩和</td><td>上限超えを検出し、中央を休みにして他の公休と入替</td></tr>
+<tr><td class="c">8</td><td>医師5名日の均等化</td><td>忙しい日の出勤回数を個人間で誤差1以内に</td></tr>
+<tr><td class="c">9</td><td>記号割当</td><td>○（1名/日）→ ▲（最低3名）→ 残りを ● ▲ で均等</td></tr>
+<tr><td class="c">10</td><td>記号の個人差均等化</td><td>○●▲の月合計を誤差2以内に（同日で交換）</td></tr>
+<tr><td class="c">11</td><td>書き込み＋ログ記録</td><td>変更セルを全記録（復元用）</td></tr>
+</table>
+
+<div class="danger">
+<strong>優先順位の設計</strong><br>
+公休ノルマ（誤差0・絶対）　＞　連勤上限　＞　必要出勤数（努力目標）<br><br>
+必要人数を満たせない日が出ても<strong>公休は削りません</strong>。不足日は結果レポートと過不足行に表示されるので、派遣の追加投入などで調整してください。
+</div>
+
+<h3><span class="step">STEP 5</span>結果レポートの確認</h3>
+<p>実行後のダイアログに表示される内容です。</p>
+<table>
+<tr><th style="width:200px">表示</th><th>意味</th></tr>
+<tr><td>入力範囲</td><td>今回処理した入力欄のアドレス。意図した範囲か確認できます</td></tr>
+<tr><td>対象者／スキップ行</td><td>氏名のある行数と、空行・集計行として除外した行数</td></tr>
+<tr><td>各人の集計</td><td>出勤／休／連勤max／連休max／医5日／○●▲の回数</td></tr>
+<tr><td>公休ノルマ未達</td><td>空きセルが足りず配置しきれなかった。手入力を減らすか休日数を見直す</td></tr>
+<tr><td>事務員が不在の日</td><td>事務員ゼロの日数。回避を試みますが不可能な場合に発生</td></tr>
+<tr><td>遅番が目標に届かない日</td><td>▲の人数が設定値（既定3名）未満の日数</td></tr>
+<tr><td>必要数に届かない日</td><td>出勤数 &lt; 医師数+1 の日数と最大不足人数</td></tr>
+</table>
+
+<h3><span class="step">STEP 6</span>過不足行で日別チェック</h3>
+<p><code>過不足</code> 行がマイナスの日を確認します。対処は次のいずれか。</p>
+<ul>
+<li>派遣・単発スタッフをその日に追加投入（STEP 2 に戻る）</li>
+<li>誰かの公休を別日に移動（手修正）</li>
+<li>その日は不足を許容する</li>
+</ul>
+
+<h3><span class="step">STEP 7</span>手修正で仕上げ</h3>
+<p>パレットでダブルクリック修正します。<strong>手動変更もログに記録</strong>されるため、後から戻せます。</p>
+
+<h2>5. やり直し・元に戻す</h2>
+<table>
+<tr><th style="width:200px">マクロ名</th><th>動作</th></tr>
+<tr><td><span class="macro">シフト変更を戻す</span></td><td>直前のセッションを取り消して復元。<strong>繰り返し実行で1回ずつ遡れます</strong>（値・文字色・太字・背景色すべて復元）</td></tr>
+<tr><td><span class="macro">シフト白紙化</span></td><td>入力欄を全消去。これもログに記録され復元可能</td></tr>
+<tr><td><span class="macro">シフトログリセット</span></td><td>ログを全消去。<strong>実行後は過去に戻せなくなります</strong>（期替わり用）。<strong>A1の対象月を変更すると自動で確認ダイアログ</strong>が出ます</td></tr>
+</table>
+
+<div class="info">
+「セッション」とは1回の操作単位です。自動作成1回・白紙化1回・手動での同時複数セル変更が、それぞれ1セッションになります。
+</div>
+
+<h2>6. メンバーの追加・変更</h2>
+
+<h3>新しいスタッフを追加する</h3>
+<ol>
+<li>シフトシートで追加したい位置に<strong>行を挿入</strong>し、A列に氏名を記入</li>
+<li><code>自動作成設定</code> シートに1行追記（氏名・区分・勤務ルール・遅番可否）</li>
+<li><span class="macro">シフト設定チェック</span> で警告ゼロを確認</li>
+</ol>
+<div class="info">
+マスタの行順はシフト表と揃える必要はありません。<strong>氏名で照合</strong>しているため、シフト表の行位置は自由です。
+</div>
+
+<h3>薬剤師と事務員を見やすく分ける</h3>
+<p>間に<strong>空行を入れて構いません</strong>。氏名が空の行は自動生成で完全にスキップされます（v7.0.0以降）。区切り線や背景色を付けた行も問題ありません。</p>
+<p>また <code>医師数</code> <code>薬剤師出勤数</code> <code>事務員出勤数</code> <code>過不足</code> <code>合計</code> <code>シフトパレット</code> で始まる行は、<strong>入力範囲に紛れ込んでも氏名として扱われません</strong>（v7.1.0）。範囲がずれた時の保険です。</p>
+
+<h3>休業・退職する場合</h3>
+<p>マスタの「休業(○=休業中)」列に <code>○</code> を入れてください。その月は一切配置されません。シフト表の行は残しておいて構いません。</p>
+
+<div class="danger">
+<strong>マスタA列に数式を入れないでください。</strong> 氏名を数式で自動取得すると、空行を入れた時に空の値が混入し、区分・休業などの手入力列との対応がずれます。氏名は直接入力してください。
+</div>
+
+<h2>7. 全体ルールの調整</h2>
+<p><code>自動作成設定</code> シートのK列・L列で全体ルールを変更できます。</p>
+<table>
+<tr><th style="width:60px">セル</th><th style="width:240px">項目</th><th style="width:70px">既定</th><th>説明</th></tr>
+<tr><td class="c">L5</td><td>早番(○) 人数/日</td><td class="c">1</td><td>毎日この人数を○にする</td></tr>
+<tr><td class="c">L6</td><td>遅番(▲) 最低人数/日</td><td class="c">3</td><td>努力目標（誤差-1まで許容）</td></tr>
+<tr><td class="c">L7</td><td>連勤の上限（日）</td><td class="c">3</td><td>超えたら入替を試みる</td></tr>
+<tr><td class="c">L8</td><td>連休の上限（日）</td><td class="c">3</td><td>公休を連続させる最大日数</td></tr>
+<tr><td class="c">L9</td><td>週の基本休日数</td><td class="c">2</td><td>1週あたりの標準的な休み</td></tr>
+<tr><td class="c">L10</td><td>必要出勤数（医師数+n）の n</td><td class="c">1</td><td>必要人数の計算式</td></tr>
+<tr><td class="c">L11</td><td>ノルマ外の休み記号</td><td class="c">有休</td><td>公休ノルマに数えない記号（カンマ区切り）</td></tr>
+<tr><td class="c">L12</td><td>週の定義</td><td class="c">―</td><td>日曜始まり・土曜終わり（固定）</td></tr>
+<tr><td class="c">L13</td><td>事務員の2人目の記号</td><td class="c">●</td><td>事務員の○は1日1人まで、2人目以降はこの記号</td></tr>
+</table>
+
+<h2>8. 困ったときは</h2>
+<table>
+<tr><th style="width:270px">症状</th><th>原因と対処</th></tr>
+<tr><td>誰もいない行にシフトが入る</td><td>v7.0.0で修正済み。モジュールが古い可能性があります</td></tr>
+<tr><td>休業設定が効いていない</td><td>氏名がシフト表と一致していない。<span class="macro">シフト設定チェック</span> で確認</td></tr>
+<tr><td>特定の人だけ設定が反映されない</td><td>氏名の綴り違い（全角/半角・スペース）。または同名が2行ある</td></tr>
+<tr><td>ダブルクリックが反応しない</td><td>パレットが <code>OFF</code> モード。<code>切替</code> か記号を選ぶ</td></tr>
+<tr><td>パレットの位置がずれた</td><td><span class="macro">ShiftClick_パレット作成</span> で作り直す（<code>過不足</code> 行の下に配置されます）</td></tr>
+<tr><td>「入力範囲が医師数(診)の2行上を超えています」</td><td>行を増やして緩衝行が埋まっている。名前付き範囲「シフトパレット範囲」の終端を <code>医師数(診)</code> の2行上に直す（1章の数式を参照）</td></tr>
+<tr><td>入力できる行が足りない</td><td>範囲の下端が上すぎる。同じく終端を <code>医師数(診)</code> の2行上まで広げる</td></tr>
+<tr><td>集計行にシフトが入る</td><td>v7.1.0で除外済み。モジュールが古い可能性があります</td></tr>
+<tr><td>範囲がおかしい</td><td><span class="macro">ShiftClick_セルフチェック</span> で範囲と参照元、下端の妥当性を確認</td></tr>
+<tr><td>公休ノルマ未達が出る</td><td>手入力が多すぎて空きセルが不足。手入力を減らす</td></tr>
+<tr><td>人員不足の日が多い</td><td>公休ノルマ優先の設計上の結果。派遣投入か L10 の見直し</td></tr>
+<tr><td>結果が気に入らない</td><td><span class="macro">シフト変更を戻す</span> → 入力を調整 → 再実行</td></tr>
+</table>
+
+<h2>9. チェックリスト（毎月の作業）</h2>
+<table>
+<tr><th style="width:40px">☐</th><th>作業</th></tr>
+<tr><td class="c">☐</td><td>A1 の対象月を確認</td></tr>
+<tr><td class="c">☐</td><td>メンバー変更があればマスタを更新 → <span class="macro">シフト設定チェック</span></td></tr>
+<tr><td class="c">☐</td><td>4〜8行に医師名を入力（医師数が正しいか確認）</td></tr>
+<tr><td class="c">☐</td><td>希望休・有休・夏休を入力</td></tr>
+<tr><td class="c">☐</td><td>派遣・単発スタッフの出勤日を入力</td></tr>
+<tr><td class="c">☐</td><td>確定シフトを先付け</td></tr>
+<tr><td class="c">☐</td><td><span class="macro">シフト自動作成</span> を実行</td></tr>
+<tr><td class="c">☐</td><td>結果レポートの警告を確認</td></tr>
+<tr><td class="c">☐</td><td>過不足行のマイナス日を確認・調整</td></tr>
+<tr><td class="c">☐</td><td>手修正で仕上げ</td></tr>
+<tr><td class="c">☐</td><td>行を増やした場合は <span class="macro">ShiftClick_セルフチェック</span> で入力範囲を確認</td></tr>
+<tr><td class="c">☐</td><td>ファイルを保存（マクロ有効形式 .xlsm）</td></tr>
+</table>
+
+<footer>
+くるむ薬局札幌店 シフト表 操作マニュアル　/　ShiftAuto v7.2.0・ShiftClick v8.2 準拠<br>
+このマニュアルはブラウザで開いて印刷・PDF保存できます。
+</footer>
+
+</body>
+</html>
