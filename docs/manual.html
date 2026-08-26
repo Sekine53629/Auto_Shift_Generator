@@ -34,7 +34,7 @@
 <body>
 
 <h1>くるむ薬局札幌店　シフト表 操作マニュアル</h1>
-<p class="sub">対象ファイル: くるむ薬局_シフト_自動集計版.xlsm　/　ShiftAuto v7.2.0・ShiftClick v8.2　/　2026-08-24</p>
+<p class="sub">対象ファイル: くるむ薬局_シフト_自動集計版.xlsm　/　ShiftAuto v8.0.0・ShiftClick v9.0・ShiftSetup v1.1・ShiftCommon v1.0　/　2026-08-26</p>
 
 <div class="info">
 <strong>このシステムでできること</strong><br>
@@ -50,36 +50,55 @@
 <tr><td><code>シフト変更ログ</code></td><td>変更履歴。「シフト変更を戻す」の復元元データ</td></tr>
 </table>
 
-<h3>シフトシートの行構成</h3>
+<h3>標準モジュールの構成</h3>
+<p>VBE に取り込む標準モジュールは次の5本です。<strong>すべて入れてください</strong>（依存関係があります）。</p>
 <table>
-<tr><th style="width:110px">位置</th><th>内容</th></tr>
-<tr><td class="c">A1</td><td>対象月の日付（この月のシフトを作成します）。<strong>変更するとログのリセット確認</strong>が出ます（期替わり）</td></tr>
-<tr><td class="c">4〜8行</td><td>医師名（出勤する医師を記入 → 医師数に自動反映）</td></tr>
-<tr><td class="c">10行</td><td>日付行</td></tr>
-<tr><td class="c">11〜25行</td><td><strong>シフト入力欄</strong>（A列に氏名、各日にシフト記号）</td></tr>
-<tr><td class="c">26行</td><td><strong>緩衝行</strong>（入力欄の外。行追加ののりしろ。ここには入力しません）</td></tr>
-<tr><td class="c">27行</td><td><code>医師数(診)</code>　その日の医師数（自動計算）</td></tr>
-<tr><td class="c">28行</td><td><code>薬剤師出勤数</code>　その日の薬剤師の出勤数（自動計算）</td></tr>
-<tr><td class="c">29行</td><td><code>過不足</code>　<strong>出勤数 − 必要数</strong>。マイナスは人員不足</td></tr>
-<tr><td class="c">30〜32行</td><td>★マーカー行 / パレット本体 / ラベル行</td></tr>
+<tr><th style="width:170px">モジュール</th><th>役割</th></tr>
+<tr><td><code>ShiftCommon</code></td><td><strong>共通土台。</strong>シート名・A列ラベル・列・行オフセット・範囲解決を一元管理。他の3本はここを参照します</td></tr>
+<tr><td><code>ErrorLogger</code></td><td>エラー／成功ログの出力（<code>C:\VBAErrorLogs\</code> にCSV）</td></tr>
+<tr><td><code>ShiftAuto</code><br>(AutoShiftGenerator)</td><td>シフト自動作成・変更ログ・戻す・白紙化・設定チェック</td></tr>
+<tr><td><code>ShiftClick</code></td><td>クリック入力（パレットのモード切替・スタンプ・連続切替）</td></tr>
+<tr><td><code>ShiftSetup</code></td><td>シートの初期設定（パレット生成・集計列・名前付き範囲）</td></tr>
+</table>
+<p>加えて、シフトシートの<strong>シートモジュール</strong>に <code>Sheet1.bas</code> の内容を貼り付けます。</p>
+
+<div class="info">
+<strong>不具合が起きたら</strong> <code>C:\VBAErrorLogs\ErrorLog_YYYYMMDD.csv</code> を確認してください。どのモジュールのどの処理で何が起きたかが記録されています。正常終了した処理も記録されるため、実行されたかどうかの確認にも使えます。
+</div>
+
+<h3>シフトシートの行構成</h3>
+<p>行番号は固定ではありません。<strong>A列の見出し（氏名・曜日・医師数(診)・過不足）を目印に自動で判定</strong>されます。行を足しても位置指定を直す必要はありません。</p>
+<table>
+<tr><th style="width:210px">位置</th><th>内容</th></tr>
+<tr><td class="c">A1</td><td>対象月の日付。<strong>変更するとログのリセット確認</strong>が出ます（期替わり）</td></tr>
+<tr><td class="c">日付行の3行上</td><td>★マーカー行（選択中のモード）</td></tr>
+<tr><td class="c">日付行の3行上＋1</td><td><strong>シフトパレット本体</strong></td></tr>
+<tr><td class="c">日付行の3行上＋2</td><td>パレットのラベル行</td></tr>
+<tr><td class="c">日付行</td><td>日付（その1行下が <code>氏名</code> 行）</td></tr>
+<tr><td class="c">日付行の1行下 〜<br>医師数(診)の2行上</td><td><strong>シフト入力欄</strong>（A列に氏名、各日にシフト記号）</td></tr>
+<tr><td class="c">医師数(診)の1行上</td><td><strong>緩衝行</strong>（入力欄の外。行追加ののりしろ。ここには入力しません）</td></tr>
+<tr><td class="c"><code>医師数(診)</code></td><td>その日の医師数（自動計算）</td></tr>
+<tr><td class="c"><code>薬剤師出勤数</code></td><td>その日の薬剤師の出勤数（自動計算）</td></tr>
+<tr><td class="c"><code>過不足</code></td><td><strong>出勤数 − 必要数</strong>。マイナスは人員不足</td></tr>
+<tr><td class="c">AH〜AL列</td><td>個人別の集計（休 / ○早番 / ▲遅番 / ●遅半 / 5診出勤）</td></tr>
 </table>
 
 <div class="info">
-<strong>入力欄の範囲ルール（v7.2.0）</strong><br>
-・上端 = <strong>日付行（10行）の1行下</strong><br>
+<strong>入力欄の範囲ルール</strong><br>
+・上端 = <strong>日付行の1行下</strong>（＝<code>氏名</code> 行の位置から下）<br>
 ・下端 = <strong><code>医師数(診)</code> の2行上</strong>　←1行上は緩衝行なので入力欄に含めません<br><br>
-入力欄の範囲・パレットの位置は<strong>自動追従</strong>します。入力欄の内側に行を挿入しても、空行を追加しても、範囲指定を直す必要はありません。
+実際に何行目になっているかは <span class="macro">ShiftClick_セルフチェック</span> で確認できます。
 </div>
 
 <div class="warn">
-<strong>行を増やして緩衝行が埋まってしまったら</strong> 名前付き範囲「シフトパレット範囲」の終端を <code>医師数(診)</code> の2行上に直してください。数式で自動追従させる場合は次の定義を使います。
-<div class="flow">=INDEX(シフト!$B:$B,ROW(シフト!$B$10)+1)
+<strong>行を増やして緩衝行が埋まってしまったら</strong> <span class="macro">ShiftSetup_名前付き範囲更新</span> を実行すれば、名前付き範囲が正しい位置に貼り直されます。数式で自動追従させたい場合は次の定義を使ってください。
+<div class="flow">=INDEX(シフト!$B:$B,MATCH("氏名",シフト!$A:$A,0))
  :INDEX(シフト!$AF:$AF,MATCH("医師数*",シフト!$A:$A,0)-2)</div>
-ずれている場合は <span class="macro">シフト自動作成</span> と <span class="macro">シフト設定チェック</span> が警告を出します。
+ずれている場合は <span class="macro">シフト自動作成</span> <span class="macro">シフト設定チェック</span> <span class="macro">ShiftClick_セルフチェック</span> が警告を出します。
 </div>
 
 <h2>2. シフトパレットの使い方</h2>
-<p>シフトシート下部の横一列がパレットです。<strong>クリックでモードを選び、入力欄をダブルクリックで押す</strong>のが基本操作です。</p>
+<p><strong>表の上</strong>にある横一列がパレットです。<strong>クリックでモードを選び、入力欄をダブルクリックで押す</strong>のが基本操作です。スクロールしても見えるよう、日付行の3行上に置いています。</p>
 
 <table>
 <tr><th style="width:80px">セル</th><th style="width:110px">ラベル</th><th>動作</th></tr>
@@ -98,13 +117,13 @@
 <tr><td class="c">銀行</td><td>銀行</td></tr>
 </table>
 
-<p><strong>選択中のモードは★マーカー</strong>（パレットの上の行）と、Excel下部のステータスバーに表示されます。</p>
+<p><strong>選択中のモードは★マーカー</strong>（パレットの1行上）と、Excel下部のステータスバーに表示されます。</p>
 
 <h3>パレットの操作マクロ</h3>
 <table>
 <tr><th style="width:220px">マクロ名</th><th>用途</th></tr>
 <tr><td><span class="macro">ShiftClick_パターン追加</span></td><td>パレット右端に新しい記号を追加（記号とラベルを入力）</td></tr>
-<tr><td><span class="macro">ShiftClick_パレット作成</span></td><td>パレットを既定内容で作り直す（<code>過不足</code> 行の下に自動配置。見出しはマーカー行の左に入ります）</td></tr>
+<tr><td><span class="macro">ShiftClick_パレット作成</span></td><td>パレットを既定内容で作り直す（中身は <span class="macro">ShiftSetup_パレット生成</span> と同じ）</td></tr>
 <tr><td><span class="macro">ShiftClick_連続切替に戻す</span></td><td>モードを「切替」に戻す</td></tr>
 <tr><td><span class="macro">ShiftClick_選択範囲にスタンプ</span></td><td>選択範囲に現在の記号をまとめて押す</td></tr>
 <tr><td><span class="macro">ShiftClick_セルフチェック</span></td><td>範囲設定が正しいか確認（トラブル時）。<strong>入力範囲の下端が正しい位置か</strong>も判定します</td></tr>
@@ -294,12 +313,13 @@ STEP 7   手修正で仕上げ
 <table>
 <tr><th style="width:270px">症状</th><th>原因と対処</th></tr>
 <tr><td>誰もいない行にシフトが入る</td><td>v7.0.0で修正済み。モジュールが古い可能性があります</td></tr>
+<tr><td>原因がわからない</td><td><code>C:\VBAErrorLogs\</code> の当日CSVを確認。モジュール名・処理名・行番号・変数の値まで記録されています</td></tr>
 <tr><td>休業設定が効いていない</td><td>氏名がシフト表と一致していない。<span class="macro">シフト設定チェック</span> で確認</td></tr>
 <tr><td>特定の人だけ設定が反映されない</td><td>氏名の綴り違い（全角/半角・スペース）。または同名が2行ある</td></tr>
 <tr><td>ダブルクリックが反応しない</td><td>パレットが <code>OFF</code> モード。<code>切替</code> か記号を選ぶ</td></tr>
-<tr><td>パレットの位置がずれた</td><td><span class="macro">ShiftClick_パレット作成</span> で作り直す（<code>過不足</code> 行の下に配置されます）</td></tr>
-<tr><td>「入力範囲が医師数(診)の2行上を超えています」</td><td>行を増やして緩衝行が埋まっている。名前付き範囲「シフトパレット範囲」の終端を <code>医師数(診)</code> の2行上に直す（1章の数式を参照）</td></tr>
-<tr><td>入力できる行が足りない</td><td>範囲の下端が上すぎる。同じく終端を <code>医師数(診)</code> の2行上まで広げる</td></tr>
+<tr><td>パレットの位置がずれた</td><td><span class="macro">ShiftSetup_パレット生成</span> で作り直す（日付行の3行上に配置されます）</td></tr>
+<tr><td>「入力範囲が医師数(診)の2行上を超えています」</td><td>行を増やして緩衝行が埋まっている。<span class="macro">ShiftSetup_名前付き範囲更新</span> を実行すれば直ります</td></tr>
+<tr><td>入力できる行が足りない</td><td>範囲の下端が上すぎる。同じく <span class="macro">ShiftSetup_名前付き範囲更新</span> で直る</td></tr>
 <tr><td>集計行にシフトが入る</td><td>v7.1.0で除外済み。モジュールが古い可能性があります</td></tr>
 <tr><td>範囲がおかしい</td><td><span class="macro">ShiftClick_セルフチェック</span> で範囲と参照元、下端の妥当性を確認</td></tr>
 <tr><td>公休ノルマ未達が出る</td><td>手入力が多すぎて空きセルが不足。手入力を減らす</td></tr>
@@ -325,7 +345,7 @@ STEP 7   手修正で仕上げ
 </table>
 
 <footer>
-くるむ薬局札幌店 シフト表 操作マニュアル　/　ShiftAuto v7.2.0・ShiftClick v8.2 準拠<br>
+くるむ薬局札幌店 シフト表 操作マニュアル　/　ShiftAuto v8.0.0・ShiftClick v9.0・ShiftSetup v1.1・ShiftCommon v1.0 準拠<br>
 このマニュアルはブラウザで開いて印刷・PDF保存できます。
 </footer>
 
