@@ -314,6 +314,15 @@ Public Sub ShiftSetup_ヘッダ数式()
 50      Exit Sub
 60  End If
 70  hRow = dateRowNo - 1          ' タイトル/年月行
+    ' パレットが日付行の直上3行を使うため、年月行と衝突しないか確認する
+    ' (実際の年月行の位置は ShiftSurvey_シート構造調査 で確定させること)
+75  If hRow >= PaletteBodyRow(ws) + MARKER_OFFSET Then
+76      MsgBox "年月行の想定位置(" & hRow & "行)がパレットの3行と重なります。" & vbCrLf & _
+               "上書きを避けるため、ヘッダ数式は書き込みませんでした。" & vbCrLf & vbCrLf & _
+               "ShiftSurvey_シート構造調査 を実行して、" & vbCrLf & _
+               "実際の年月行の位置を確認してください。", vbExclamation
+77      Exit Sub
+78  End If
 
 80  Application.EnableEvents = False
 
@@ -539,10 +548,9 @@ Public Sub ShiftSetup_集計行数式()
 360 End With
 
 370 If noBlock Then
-380     MsgBox "A列に「" & LBL_DOCTORS & "」が見つからないため、" & vbCrLf & _
+380     MsgBox "医師名欄を特定できなかったため、" & vbCrLf & _
                "「" & HEAD_DOC & "」の数式だけは書き込みませんでした。" & vbCrLf & vbCrLf & _
-               "医師名欄の先頭行のA列に「" & LBL_DOCTORS & "」と入れてから" & vbCrLf & _
-               "もう一度実行してください。", vbExclamation
+               "ShiftSurvey_シート構造調査 で実際の行構成を確認してください。", vbExclamation
 390 End If
 
 CleanUp:

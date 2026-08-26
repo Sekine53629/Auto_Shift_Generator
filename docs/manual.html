@@ -51,7 +51,7 @@
 </table>
 
 <h3>標準モジュールの構成</h3>
-<p>VBE に取り込む標準モジュールは次の5本です。<strong>すべて入れてください</strong>（依存関係があります）。</p>
+<p>VBE に取り込む標準モジュールは次の6本です。<strong>すべて入れてください</strong>（依存関係があります）。</p>
 <table>
 <tr><th style="width:170px">モジュール</th><th>役割</th></tr>
 <tr><td><code>ShiftCommon</code></td><td><strong>共通土台。</strong>シート名・A列ラベル・列・行オフセット・範囲解決を一元管理。他の3本はここを参照します</td></tr>
@@ -59,6 +59,7 @@
 <tr><td><code>ShiftAuto</code><br>(AutoShiftGenerator)</td><td>シフト自動作成・変更ログ・戻す・白紙化・設定チェック</td></tr>
 <tr><td><code>ShiftClick</code></td><td>クリック入力（パレットのモード切替・スタンプ・連続切替）</td></tr>
 <tr><td><code>ShiftSetup</code></td><td>シートの初期設定（パレット生成・集計行／集計列の数式・名前付き範囲）</td></tr>
+<tr><td><code>ShiftSurvey</code></td><td>シート構造の調査（読み取り専用）。行構成・数式・名前付き範囲をレポートに書き出します</td></tr>
 </table>
 <p>加えて、シフトシートの<strong>シートモジュール</strong>に <code>Sheet1.bas</code> の内容を貼り付けます。</p>
 
@@ -95,8 +96,8 @@
 実際に何行目になったかは <span class="macro">ShiftSetup_初期設定実行</span> の完了ダイアログと <span class="macro">ShiftClick_セルフチェック</span> で確認できます。
 </div>
 
-<div class="warn">
-<strong>A列の <code>医師名</code> は必須です。</strong> これが無いと <code>医師数(診)</code> の数式だけ生成されません（他の行は生成されます）。医師名欄の先頭行のA列に <code>医師名</code> と入れてください。
+<div class="info">
+<strong>医師名欄の決まり方</strong>　★マーカー行の直上5行を医師名欄とみなします。A列に <code>医師名</code> と入っている行があれば、そちらを上端として優先します（<strong>任意</strong>。入れなくても動きます）。行数を変えたい場合は <code>ShiftCommon</code> の <code>DOC_BLOCK_ROWS</code> を変更してください。
 </div>
 
 <div class="warn">
@@ -161,6 +162,23 @@
 
 <div class="warn">
 <strong>医師名スタンプの初期値はダミーです。</strong> パレットの医師名（<code>医師1</code>〜<code>医師9</code>）は、<code>ShiftSetup.bas</code> の <code>SS_PalVals</code> を編集して実際の医師名に置き換えてください。個人情報のため、書き換えた内容はGitにコミットしないでください。
+</div>
+
+<h3>シート構造の調査（ShiftSurvey）</h3>
+<p>「思った位置に生成されない」「行を大きく作り替えた」ときは、まず <span class="macro">ShiftSurvey_シート構造調査</span> を実行してください。<strong>読み取り専用</strong>で、シートを一切書き換えません。</p>
+<p><code>シート調査結果</code> という新しいシートに、次の内容が書き出されます。</p>
+<table>
+<tr><th style="width:200px">項目</th><th>内容</th></tr>
+<tr><td>1. ブック概要</td><td>シート一覧と使用範囲</td></tr>
+<tr><td>2. 名前付き範囲</td><td>定義と参照先、解決できるかどうか</td></tr>
+<tr><td>3. 現在の判定結果</td><td>開始日セル・日付行・備考行・医師数行・入力欄・パレットをマクロがどう判定しているか</td></tr>
+<tr><td>4. 行別ダンプ</td><td>1行ずつ、A列の見出し・B列の種別・値／数式のある列数・最終列・行の高さ・書式</td></tr>
+<tr><td>5. 列幅</td><td>A列から40列分の幅と非表示状態</td></tr>
+<tr><td>6. 自動作成設定</td><td>メンバー表のヘッダーと全体設定（K／L列）の中身</td></tr>
+</table>
+
+<div class="info">
+<strong>氏名は伏せて出力されます。</strong> 既知の見出し以外のA列の文字列は <code>(氏名1)</code> のような表記に置き換わり、B列以降のセルの値は出力されません。そのまま共有できます。伏せたくない場合は <code>ShiftSurvey</code> の <code>MASK_NAMES</code> を <code>False</code> にしてください。
 </div>
 
 <h2>3. 作成フロー（全体像）</h2>
