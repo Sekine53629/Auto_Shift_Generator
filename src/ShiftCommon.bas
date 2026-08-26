@@ -22,7 +22,8 @@ Option Explicit
 '                  日付行 - 1 = ラベル行
 '    集計行        医師数行 = 備考行の NOTE_TO_DOC(2) 行下
 '                  医師数行 + 1 = 薬剤師出勤数 / + 2 = 過不足
-'    医師名欄      A列「医師名」の行 - ★マーカー行の1行上
+'    医師名欄      ★マーカー行の直上 DOC_BLOCK_ROWS(5) 行
+'                  A列に「医師名」があればその行を上端として優先する
 '
 '  解決順序: 名前付き範囲 → 基準セルからの計算 → Nothing
 '  (ハードコードした番地は持たない。Nothing は呼び出し側で通知する)
@@ -43,7 +44,7 @@ Public Const LBL_PHARM   As String = "薬剤師出勤数"
 Public Const LBL_CLERK   As String = "事務員出勤数"
 Public Const LBL_SHORT   As String = "過不足"
 Public Const LBL_PALETTE As String = "シフトパレット"
-Public Const LBL_DOCTORS As String = "医師名"   ' 医師名欄ブロックの先頭行
+Public Const LBL_DOCTORS As String = "医師名"   ' 医師名欄の先頭行(任意。あれば優先)
 
 '--- 名前付き範囲の名前 ---
 Public Const NM_SHIFT   As String = "シフトパレット範囲"
@@ -57,6 +58,7 @@ Public Const COL_LAST  As String = "AF"
 Public Const DOC_GAP       As Long = 2    ' 入力欄の下端 = 医師数行の n 行上
 Public Const NOTE_TO_DOC   As Long = 2    ' 医師数行 = 備考行の n 行下
 Public Const PALETTE_ROWS  As Long = 3    ' パレットが使う行数(マーカー/本体/ラベル)
+Public Const DOC_BLOCK_ROWS As Long = 5   ' 医師名欄の行数(既定)
 Public Const PALETTE_GAP   As Long = 2    ' パレット本体行 = 日付行の n 行上
 Public Const MARKER_OFFSET As Long = -1   ' ★マーカー行(本体行からの相対)
 Public Const LABEL_OFFSET  As Long = 1    ' ラベル行(本体行からの相対)
@@ -209,18 +211,23 @@ ErrHandler:
     ShiftDocRow = 0
 End Function
 
-'--- 医師名欄のブロック(A列「医師名」の行 - ★マーカー行の1行上) ---
+'--- 医師名欄のブロック ---
+'    下端 = ★マーカー行の1行上(パレットの直前)
+'    上端 = A列に「医師名」があればその行、無ければ下端から DOC_BLOCK_ROWS 行
+'    ※ラベルは任意。人がラベルを置かなくても成立させる
 Public Function DoctorBlock(ByVal ws As Worksheet) As Range
     Dim topR As Long, botR As Long, firstCol As Long, lastCol As Long
     On Error GoTo ErrHandler
 
-10  topR = LabelRow(ws, LBL_DOCTORS)
-20  If topR = 0 Then Exit Function
-30  botR = PaletteBodyRow(ws) + MARKER_OFFSET - 1
-40  If botR < topR Then Exit Function
-50  firstCol = ws.Range(COL_FIRST & "1").Column
-60  lastCol = ws.Range(COL_LAST & "1").Column
-70  Set DoctorBlock = ws.Range(ws.Cells(topR, firstCol), ws.Cells(botR, lastCol))
+10  botR = PaletteBodyRow(ws) + MARKER_OFFSET - 1
+20  If botR < 1 Then Exit Function
+30  topR = LabelRow(ws, LBL_DOCTORS)
+40  If topR = 0 Or topR > botR Then topR = botR - DOC_BLOCK_ROWS + 1
+50  If topR < 1 Then topR = 1
+60  If botR < topR Then Exit Function
+70  firstCol = ws.Range(COL_FIRST & "1").Column
+80  lastCol = ws.Range(COL_LAST & "1").Column
+90  Set DoctorBlock = ws.Range(ws.Cells(topR, firstCol), ws.Cells(botR, lastCol))
     Exit Function
 ErrHandler:
     LogError MODULE_NAME, "DoctorBlock", Err.Number, Err.Description, Erl, _
