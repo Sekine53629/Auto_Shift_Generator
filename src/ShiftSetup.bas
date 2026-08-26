@@ -1,6 +1,6 @@
 Option Explicit
 '==================================================================
-'  シフト表 初期設定マクロ ＜標準モジュール ShiftSetup v1.1＞
+'  シフト表 初期設定マクロ ＜標準モジュール ShiftSetup v1.2＞
 '  2026-08-26
 '  ShiftCommon / ShiftClick と併用。
 '  シート上の位置はすべて ShiftCommon のラベル検索で動的に決定する。
@@ -8,11 +8,17 @@ Option Explicit
 '  実行するのは基本これ1本:
 '      ShiftSetup_初期設定実行
 '  内訳:
-'      1) パレットの生成(日付行の PALETTE_GAP 行上)
+'      1) パレットの生成(日付行の直上3行)
 '      2) 年月セル・祝日サマリーの数式セット
-'      3) AH:AL 集計列(見出し＋数式)のセット
-'      4) 名前付き範囲の再定義(シフトパレット範囲 / シフトパレット)
+'      3) 集計行(医師数(診)/薬剤師出勤数/過不足)の数式セット
+'      4) AH:AL 集計列(見出し＋数式)のセット
+'      5) 名前付き範囲の再定義(シフトパレット範囲 / シフトパレット)
 '
+'  v1.2 変更:
+'   ・基準を A列「氏名」から B列の開始日の数式セルに変更
+'   ・パレットは日付行の直上3行(マーカー/本体/ラベル)を使う
+'   ・集計行(医師数(診) / 薬剤師出勤数 / 過不足)の数式生成を追加
+'     位置は 備考行の2行下から3行
 '  v1.1 変更:
 '   ・シート名/ラベル/列/行オフセット/範囲解決を ShiftCommon に移管
 '   ・全プロシージャに ErrorLogger のエラーハンドラを追加
@@ -35,6 +41,19 @@ Private Const IDX_DOC_START As Long = 14      ' 医師名スタンプの開始�
 
 ' 医師数の「忙しい日」判定に使う人数(集計列 5診出勤)
 Private Const DOC_BUSY_COUNT As Long = 5
+
+' 集計行(A列に書き込む見出し。空欄のときだけ補う)
+Private Const HEAD_DOC   As String = "医師数(診)"
+Private Const HEAD_PHARM As String = "薬剤師出勤数"
+Private Const HEAD_SHORT As String = "過不足"
+
+' 区分の正規値(薬剤師出勤数の数式で使う)
+Private Const KIND_PHARM As String = "薬剤師"
+
+' 設定シートの「必要出勤数(医師数+n)の n」を探すラベル(前方一致)
+Private Const CFG_KEY_REQ As String = "必要出勤"
+' 設定シートが読めない場合の n
+Private Const REQ_FALLBACK As Long = 1
 
 ' 書式
 Private Const CLR_BLACK     As Long = 0
@@ -169,14 +188,16 @@ Public Sub ShiftSetup_パレット生成()
 10  Set ws = ShiftSheet()
 20  dateRowNo = DateRow(ws)
 30  If dateRowNo = 0 Then
-40      MsgBox "A列に「" & LBL_NAME & "」が見つかりません。", vbExclamation
+40      MsgBox "B列にシフト表の開始日(数式)が見つかりません。", vbExclamation
 50      Exit Sub
 60  End If
 
 70  palRow = PaletteBodyRow(ws)
-80  If palRow < 2 Then
-90      MsgBox "パレットを置く行が足りません。表の上に " & _
-               (PALETTE_GAP + 1) & " 行以上必要です。", vbExclamation
+    ' パレットは マーカー/本体/ラベル の PALETTE_ROWS(3) 行を使う
+80  If palRow = 0 Or palRow + MARKER_OFFSET < 1 Then
+90      MsgBox "パレットを置く行が足りません。" & vbCrLf & _
+               "日付行(" & dateRowNo & "行)の直上に " & PALETTE_ROWS & _
+               " 行必要です。", vbExclamation
 100     Exit Sub
 110 End If
 
@@ -289,7 +310,7 @@ Public Sub ShiftSetup_ヘッダ数式()
 10  Set ws = ShiftSheet()
 20  dateRowNo = DateRow(ws)
 30  If dateRowNo = 0 Then
-40      MsgBox "A列に「" & LBL_NAME & "」が見つかりません。", vbExclamation
+40      MsgBox "B列にシフト表の開始日(数式)が見つかりません。", vbExclamation
 50      Exit Sub
 60  End If
 70  hRow = dateRowNo - 1          ' タイトル/年月行
@@ -451,6 +472,142 @@ ErrHandler:
     SS_BusyDayFormula = ""
 End Function
 
+
+'========= 3) 集計行(医師数(診)/薬剤師出勤数/過不足)の数式セット =========
+'   位置: 備考行の NOTE_TO_DOC(2) 行下から3行
+'     医師数(診)   = 医師名欄ブロックを列ごとに COUNTA
+'     薬剤師出勤数 = 入力欄のうち区分が薬剤師の行の出勤記号を数える
+'     過不足       = 薬剤師出勤数 - (医師数 + 必要出勤数の n)
+Public Sub ShiftSetup_集計行数式()
+    Dim ws As Worksheet, noteRow As Long, docRow As Long
+    Dim topR As Long, botR As Long, docBlk As Range
+    Dim firstCol As Long, lastCol As Long, c As Long, colL As String
+    Dim blkTop As Long, blkBot As Long, noBlock As Boolean
+    On Error GoTo ErrHandler
+
+10  Set ws = ShiftSheet()
+20  noteRow = LabelRow(ws, LBL_NOTE)
+30  If noteRow = 0 Then
+40      MsgBox "A列に「" & LBL_NOTE & "」が見つかりません。" & vbCrLf & _
+               "集計行の位置を決められないため中止しました。", vbExclamation
+50      Exit Sub
+60  End If
+70  docRow = noteRow + NOTE_TO_DOC
+80  topR = ShiftTopRow(ws)
+90  botR = ShiftBottomRow(ws)
+100 If topR = 0 Or botR = 0 Then
+110     MsgBox "シフト入力欄を特定できないため中止しました。", vbExclamation
+120     Exit Sub
+130 End If
+
+140 Set docBlk = DoctorBlock(ws)
+150 noBlock = (docBlk Is Nothing)
+160 If Not noBlock Then
+170     blkTop = docBlk.Row
+180     blkBot = docBlk.Row + docBlk.Rows.Count - 1
+190 End If
+
+200 firstCol = ws.Range(COL_FIRST & "1").Column
+210 lastCol = ws.Range(COL_LAST & "1").Column
+
+220 Application.EnableEvents = False
+230 Application.ScreenUpdating = False
+
+    '--- A列の見出し(空欄のときだけ補う) ---
+240 SS_FillHeading ws, docRow, HEAD_DOC
+250 SS_FillHeading ws, docRow + 1, HEAD_PHARM
+260 SS_FillHeading ws, docRow + 2, HEAD_SHORT
+
+270 For c = firstCol To lastCol
+280     colL = ColLetter(c)
+        '--- 医師数(診): 医師名欄ブロックの COUNTA ---
+290     If Not noBlock Then
+300         ws.Cells(docRow, c).Formula = _
+                "=COUNTA(" & colL & blkTop & ":" & colL & blkBot & ")"
+310     End If
+        '--- 薬剤師出勤数 ---
+320     ws.Cells(docRow + 1, c).Formula2 = SS_PharmFormula(colL, topR, botR)
+        '--- 過不足 = 薬剤師出勤数 - (医師数 + n) ---
+330     ws.Cells(docRow + 2, c).Formula = _
+            "=" & colL & (docRow + 1) & "-(" & colL & docRow & "+" & SS_RequiredN() & ")"
+340 Next c
+
+350 With ws.Range(ws.Cells(docRow, firstCol), ws.Cells(docRow + 2, lastCol))
+        .HorizontalAlignment = xlCenter
+        .Font.Bold = True
+        .Font.Size = FS_BODY
+360 End With
+
+370 If noBlock Then
+380     MsgBox "A列に「" & LBL_DOCTORS & "」が見つからないため、" & vbCrLf & _
+               "「" & HEAD_DOC & "」の数式だけは書き込みませんでした。" & vbCrLf & vbCrLf & _
+               "医師名欄の先頭行のA列に「" & LBL_DOCTORS & "」と入れてから" & vbCrLf & _
+               "もう一度実行してください。", vbExclamation
+390 End If
+
+CleanUp:
+    On Error Resume Next
+    Application.ScreenUpdating = True
+    Application.EnableEvents = True
+    On Error GoTo 0
+    LogSuccess MODULE_NAME, "ShiftSetup_集計行数式", _
+               "Set aggregate rows " & docRow & "-" & (docRow + 2) & _
+               "; doctorBlock=" & IIf(noBlock, "none", blkTop & "-" & blkBot)
+    Exit Sub
+
+ErrHandler:
+    LogError MODULE_NAME, "ShiftSetup_集計行数式", Err.Number, Err.Description, Erl, _
+             "noteRow=" & noteRow & "; docRow=" & docRow & "; topRow=" & topR & _
+             "; bottomRow=" & botR & "; c=" & c
+    MsgBox "集計行のセットでエラーが発生しました: " & Err.Description, vbExclamation
+    Resume CleanUp
+End Sub
+
+'--- A列の見出しが空欄のときだけ書き込む ---
+Private Sub SS_FillHeading(ByVal ws As Worksheet, ByVal r As Long, ByVal txt As String)
+    On Error GoTo ErrHandler
+
+10  If Len(Trim$(CStr(ws.Cells(r, 1).Value))) = 0 Then ws.Cells(r, 1).Value = txt
+    Exit Sub
+ErrHandler:
+    LogError MODULE_NAME, "SS_FillHeading", Err.Number, Err.Description, Erl, _
+             "r=" & r & "; txt=" & txt
+End Sub
+
+'--- 必要出勤数の n を設定シートから読む数式片 ---
+Private Function SS_RequiredN() As String
+    On Error GoTo ErrHandler
+
+10  SS_RequiredN = "IFERROR(INDEX(" & SHT_CFG & "!$L:$L,MATCH(""" & CFG_KEY_REQ & _
+                   "*""," & SHT_CFG & "!$K:$K,0))," & REQ_FALLBACK & ")"
+    Exit Function
+ErrHandler:
+    LogError MODULE_NAME, "SS_RequiredN", Err.Number, Err.Description, Erl, ""
+    SS_RequiredN = CStr(REQ_FALLBACK)
+End Function
+
+'--- 薬剤師出勤数の数式(区分が薬剤師の行だけ出勤記号を数える) ---
+Private Function SS_PharmFormula(ByVal colL As String, _
+                                 ByVal topR As Long, ByVal botR As Long) As String
+    Dim syms As Variant, i As Long, symPart As String, rngRef As String
+    On Error GoTo ErrHandler
+
+10  rngRef = colL & topR & ":" & colL & botR
+20  syms = SS_WorkSyms()
+30  For i = LBound(syms) To UBound(syms)
+40      If Len(symPart) > 0 Then symPart = symPart & "+"
+50      symPart = symPart & "(" & rngRef & "=""" & syms(i) & """)"
+60  Next i
+70  SS_PharmFormula = "=SUMPRODUCT((IFERROR(INDEX(" & SHT_CFG & "!$B:$B,MATCH($A" & topR & _
+                      ":$A" & botR & "," & SHT_CFG & "!$A:$A,0)),"""")=""" & KIND_PHARM & _
+                      """)*(" & symPart & "))"
+    Exit Function
+ErrHandler:
+    LogError MODULE_NAME, "SS_PharmFormula", Err.Number, Err.Description, Erl, _
+             "colL=" & colL & "; topR=" & topR & "; botR=" & botR
+    SS_PharmFormula = ""
+End Function
+
 '====================== 4) 名前付き範囲 ==========================
 Public Sub ShiftSetup_名前付き範囲更新()
     Dim ws As Worksheet, topR As Long, botR As Long
@@ -462,7 +619,7 @@ Public Sub ShiftSetup_名前付き範囲更新()
 30  botR = ShiftBottomRow(ws)
 40  palRow = PaletteBodyRow(ws)
 50  If topR = 0 Or botR = 0 Or palRow = 0 Then
-60      MsgBox "基準ラベル(" & LBL_NAME & " / " & LBL_WEEK & " / " & _
+60      MsgBox "基準(B列の開始日の数式 / A列の " & LBL_NOTE & " / " & _
                LBL_DOC & ")が見つかりません。", vbExclamation
 70      Exit Sub
 80  End If
@@ -507,6 +664,23 @@ ErrHandler:
              "name=" & nm & "; refersTo=" & refersTo
 End Sub
 
+'--- 完了ダイアログ用: 医師名欄ブロックの表示文字列 ---
+Private Function SS_BlockText(ByVal ws As Worksheet) As String
+    Dim b As Range
+    On Error GoTo ErrHandler
+
+10  Set b = DoctorBlock(ws)
+20  If b Is Nothing Then
+30      SS_BlockText = "(未検出: A列に「" & LBL_DOCTORS & "」がありません)"
+40  Else
+50      SS_BlockText = b.Row & "-" & (b.Row + b.Rows.Count - 1) & " 行"
+60  End If
+    Exit Function
+ErrHandler:
+    LogError MODULE_NAME, "SS_BlockText", Err.Number, Err.Description, Erl, ""
+    SS_BlockText = "(不明)"
+End Function
+
 '====================== 一括実行 =================================
 Public Sub ShiftSetup_初期設定実行()
     Dim ws As Worksheet, msg As String
@@ -519,7 +693,7 @@ Public Sub ShiftSetup_初期設定実行()
 40  botR = ShiftBottomRow(ws)
 50  If dateRowNo = 0 Or topR = 0 Or botR = 0 Then
 60      MsgBox "A列の基準ラベルが見つからないため中止しました。" & vbCrLf & _
-               "必要なラベル: " & LBL_NAME & " / " & LBL_WEEK & " / " & LBL_DOC, _
+               "必要な基準: B列の開始日の数式 / A列の " & LBL_NOTE & " または " & LBL_DOC, _
                vbExclamation, "初期設定"
 70      Exit Sub
 80  End If
@@ -528,18 +702,22 @@ Public Sub ShiftSetup_初期設定実行()
 
 100 ShiftSetup_パレット生成
 110 ShiftSetup_ヘッダ数式
-120 ShiftSetup_集計列数式
-130 ShiftSetup_名前付き範囲更新
+120 ShiftSetup_集計行数式
+130 ShiftSetup_集計列数式
+140 ShiftSetup_名前付き範囲更新
 
-140 Application.Calculation = xlCalculationAutomatic
-150 Application.CalculateFull
+150 Application.Calculation = xlCalculationAutomatic
+160 Application.CalculateFull
 
-160 msg = "初期設定が完了しました。" & vbCrLf & vbCrLf & _
-          "日付行          : " & dateRowNo & " 行" & vbCrLf & _
+170 msg = "初期設定が完了しました。" & vbCrLf & vbCrLf & _
+          "日付行(開始日)  : " & dateRowNo & " 行" & vbCrLf & _
+          "パレット        : " & (PaletteBodyRow(ws) + MARKER_OFFSET) & "-" & _
+                                 (PaletteBodyRow(ws) + LABEL_OFFSET) & " 行" & vbCrLf & _
           "シフト入力範囲  : " & COL_FIRST & topR & ":" & COL_LAST & botR & vbCrLf & _
-          "パレット本体行  : " & PaletteBodyRow(ws) & " 行" & vbCrLf & _
+          "医師名欄        : " & SS_BlockText(ws) & vbCrLf & _
+          "集計行          : " & ShiftDocRow(ws) & "-" & (ShiftDocRow(ws) + 2) & " 行" & vbCrLf & _
           "集計列          : " & COL_AGG & "-" & COL_AGG_END
-170 MsgBox msg, vbInformation, "初期設定"
+180 MsgBox msg, vbInformation, "初期設定"
 
 CleanUp:
     On Error Resume Next

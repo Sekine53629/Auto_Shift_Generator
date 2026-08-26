@@ -539,7 +539,7 @@ Public Sub ShiftClick_セルフチェック()
 160 drift = ShiftRangeDrift(ws)
 170 If grid Is Nothing Then
 180     warn = vbCrLf & "■ シフト入力欄を特定できません" & vbCrLf & _
-               "　A列の「" & LBL_NAME & "」「" & LBL_WEEK & "」「" & LBL_DOC & _
+               "　B列の開始日の数式、またはA列の「" & LBL_NOTE & "」「" & LBL_DOC & _
                "」を確認してください" & vbCrLf
 190 ElseIf drift > 0 Then
 200     warn = vbCrLf & "■ 範囲の下端が " & LBL_DOC & "(" & docRow & "行)の" & _
