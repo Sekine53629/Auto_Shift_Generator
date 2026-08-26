@@ -37,7 +37,7 @@ Private Const KIND_PH   As String = "薬剤師"
 Private Const KIND_CL   As String = "事務員"
 ' 氏名として扱わない集計行ラベル(前方一致・カンマ区切り)
 Private Const NON_NAME_LABELS As String = _
-    "医師数,薬剤師出勤数,事務員出勤数,過不足,合計,シフトパレット"
+    "医師数,薬剤師出勤数,事務員出勤数,過不足,合計,シフトパレット,備考,医師名"
 ' 予定ステータス
 Private Const ST_SKIP  As Long = -1   ' 月外・休業・空行・集計行
 Private Const ST_WORK  As Long = 1    ' 自動:出勤
@@ -152,7 +152,7 @@ Public Sub シフト自動作成()
     Set grid = ShiftInputRange(ws)
     If grid Is Nothing Then
         MsgBox "シフト入力欄を特定できません。" & vbCrLf & _
-               "A列の「" & LBL_NAME & "」「" & LBL_WEEK & "」「" & LBL_DOC & _
+               "B列の開始日の数式、またはA列の「" & LBL_NOTE & "」「" & LBL_DOC & _
                "」を確認してください。", vbExclamation: Exit Sub
     End If
     mNP = grid.Rows.Count: mND = grid.Columns.Count
@@ -775,7 +775,7 @@ Public Sub シフト設定チェック()
     Set grid = ShiftInputRange(ws)
     If grid Is Nothing Then
         MsgBox "シフト入力欄を特定できません。" & vbCrLf & _
-               "A列の「" & LBL_NAME & "」「" & LBL_WEEK & "」「" & LBL_DOC & _
+               "B列の開始日の数式、またはA列の「" & LBL_NOTE & "」「" & LBL_DOC & _
                "」を確認してください。", vbExclamation: Exit Sub
     End If
     '--- 範囲が集計行に近すぎないか(下端は医師数の DOC_GAP 行上まで) ---
@@ -997,7 +997,7 @@ Public Sub シフト白紙化()
     Set grid = ShiftInputRange(ws)
     If grid Is Nothing Then
         MsgBox "シフト入力欄を特定できません。" & vbCrLf & _
-               "A列の「" & LBL_NAME & "」「" & LBL_WEEK & "」「" & LBL_DOC & _
+               "B列の開始日の数式、またはA列の「" & LBL_NOTE & "」「" & LBL_DOC & _
                "」を確認してください。", vbExclamation: Exit Sub
     End If
     If MsgBox("シフト入力欄(" & grid.Address(False, False) & ")の入力をすべて消去します。" & vbCrLf & _

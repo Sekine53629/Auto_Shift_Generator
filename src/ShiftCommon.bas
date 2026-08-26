@@ -1,6 +1,6 @@
 Option Explicit
 '==================================================================
-'  シフト表 共通モジュール ＜標準モジュール ShiftCommon v1.0＞
+'  シフト表 共通モジュール ＜標準モジュール ShiftCommon v1.1＞
 '  2026-08-26
 '
 '  シート名・A列ラベル・列・行オフセット・範囲解決をここに一元化する。
@@ -9,14 +9,22 @@ Option Explicit
 '  (v6-v8 で各モジュールが別々のフォールバック範囲を持ち、
 '   仕様がずれ続けたため v1.0 で集約した)
 '
-'  範囲の仕様:
-'    シフト入力欄  上端 = 日付行の1行下
-'                  下端 = 医師数行の DOC_GAP 行上 (間の1行は緩衝行)
-'    パレット      本体行 = 日付行の PALETTE_GAP 行上
-'                  本体行 + MARKER_OFFSET = ★マーカー行
-'                  本体行 + LABEL_OFFSET  = ラベル行
+'  基準セル:
+'    日付行 = B列で「数式が入っていて日付を返す」最初のセル(シフト表の開始日)
+'    ※ A列の「氏名」ラベルには依存しない(v1.1 で廃止)
 '
-'  解決順序: 名前付き範囲 → A列ラベルからの計算 → Nothing
+'  範囲の仕様:
+'    シフト入力欄  上端 = 曜日行の1行下(曜日行が無ければ日付行の1行下)
+'                  下端 = 医師数行の DOC_GAP 行上
+'    パレット      日付行の直上 PALETTE_ROWS(3) 行を使う
+'                  日付行 - 3 = ★マーカー行
+'                  日付行 - 2 = パレット本体行
+'                  日付行 - 1 = ラベル行
+'    集計行        医師数行 = 備考行の NOTE_TO_DOC(2) 行下
+'                  医師数行 + 1 = 薬剤師出勤数 / + 2 = 過不足
+'    医師名欄      A列「医師名」の行 - ★マーカー行の1行上
+'
+'  解決順序: 名前付き範囲 → 基準セルからの計算 → Nothing
 '  (ハードコードした番地は持たない。Nothing は呼び出し側で通知する)
 '==================================================================
 Private Const MODULE_NAME As String = "ShiftCommon"
@@ -28,13 +36,14 @@ Public Const SHT_HOLIDAY As String = "祝日マスタ"
 Public Const SHT_LOG     As String = "シフト変更ログ"
 
 '--- A列の基準ラベル(前方一致で検索) ---
-Public Const LBL_NAME    As String = "氏名"
 Public Const LBL_WEEK    As String = "曜日"
+Public Const LBL_NOTE    As String = "備考"
 Public Const LBL_DOC     As String = "医師数"
 Public Const LBL_PHARM   As String = "薬剤師出勤数"
 Public Const LBL_CLERK   As String = "事務員出勤数"
 Public Const LBL_SHORT   As String = "過不足"
 Public Const LBL_PALETTE As String = "シフトパレット"
+Public Const LBL_DOCTORS As String = "医師名"   ' 医師名欄ブロックの先頭行
 
 '--- 名前付き範囲の名前 ---
 Public Const NM_SHIFT   As String = "シフトパレット範囲"
@@ -46,9 +55,14 @@ Public Const COL_LAST  As String = "AF"
 
 '--- 行オフセット ---
 Public Const DOC_GAP       As Long = 2    ' 入力欄の下端 = 医師数行の n 行上
-Public Const PALETTE_GAP   As Long = 3    ' パレット本体行 = 日付行の n 行上
+Public Const NOTE_TO_DOC   As Long = 2    ' 医師数行 = 備考行の n 行下
+Public Const PALETTE_ROWS  As Long = 3    ' パレットが使う行数(マーカー/本体/ラベル)
+Public Const PALETTE_GAP   As Long = 2    ' パレット本体行 = 日付行の n 行上
 Public Const MARKER_OFFSET As Long = -1   ' ★マーカー行(本体行からの相対)
 Public Const LABEL_OFFSET  As Long = 1    ' ラベル行(本体行からの相対)
+
+'--- 開始日の数式セルを探す行数の上限 ---
+Private Const MAX_SCAN_ROWS As Long = 200
 
 '--- パレットの固定位置(左からの番号) ---
 Public Const IDX_OFF       As Long = 1    ' OFF(マクロ停止)
@@ -117,13 +131,35 @@ End Function
 '==================================================================
 ' 行の解決(すべて A列ラベル基準)
 '==================================================================
-'--- 日付行 = 氏名行の1行上 ---
-Public Function DateRow(ByVal ws As Worksheet) As Long
-    Dim r As Long
+'--- シフト表の開始日セル(B列で最初に見つかる「数式かつ日付」のセル) ---
+Public Function StartDateCell(ByVal ws As Worksheet) As Range
+    Dim c As Range, r As Long, col As Long
     On Error GoTo ErrHandler
 
-10  r = LabelRow(ws, LBL_NAME)
-20  If r > 1 Then DateRow = r - 1
+10  col = ws.Range(COL_FIRST & "1").Column
+20  For r = 1 To MAX_SCAN_ROWS
+30      Set c = ws.Cells(r, col)
+40      If c.HasFormula Then
+50          If IsDate(c.Value) Then
+60              Set StartDateCell = c
+70              Exit Function
+80          End If
+90      End If
+100 Next r
+    Exit Function
+ErrHandler:
+    LogError MODULE_NAME, "StartDateCell", Err.Number, Err.Description, Erl, _
+             "sheet=" & ws.Name & "; r=" & r
+    Set StartDateCell = Nothing
+End Function
+
+'--- 日付行 = 開始日の数式が入っている行 ---
+Public Function DateRow(ByVal ws As Worksheet) As Long
+    Dim c As Range
+    On Error GoTo ErrHandler
+
+10  Set c = StartDateCell(ws)
+20  If Not c Is Nothing Then DateRow = c.Row
     Exit Function
 ErrHandler:
     LogError MODULE_NAME, "DateRow", Err.Number, Err.Description, Erl, _
@@ -131,25 +167,65 @@ ErrHandler:
     DateRow = 0
 End Function
 
-'--- 入力欄の上端 = 曜日行より下・医師数行より上で A列に値がある最初の行 ---
+'--- 入力欄の上端 ---
+'    曜日行があればその1行下、無ければ日付行の1行下から始め、
+'    A列に値がある最初の行を上端とする(先頭の空行を飛ばす)
 Public Function ShiftTopRow(ByVal ws As Worksheet) As Long
-    Dim wkRow As Long, docRow As Long, r As Long
+    Dim startRow As Long, docRow As Long, r As Long
     On Error GoTo ErrHandler
 
-10  wkRow = LabelRow(ws, LBL_WEEK)
-20  docRow = LabelRow(ws, LBL_DOC)
-30  If wkRow = 0 Or docRow = 0 Then Exit Function
-40  For r = wkRow + 1 To docRow - 1
-50      If Len(Trim$(CStr(ws.Cells(r, 1).Value))) > 0 Then
-60          ShiftTopRow = r
-70          Exit Function
-80      End If
-90  Next r
+10  startRow = LabelRow(ws, LBL_WEEK)
+20  If startRow = 0 Then startRow = DateRow(ws)
+30  docRow = ShiftDocRow(ws)
+40  If startRow = 0 Or docRow = 0 Then Exit Function
+50  For r = startRow + 1 To docRow - 1
+60      If Len(Trim$(CStr(ws.Cells(r, 1).Value))) > 0 Then
+70          ShiftTopRow = r
+80          Exit Function
+90      End If
+100 Next r
     Exit Function
 ErrHandler:
     LogError MODULE_NAME, "ShiftTopRow", Err.Number, Err.Description, Erl, _
-             "sheet=" & ws.Name & "; weekRow=" & wkRow & "; docRow=" & docRow
+             "sheet=" & ws.Name & "; startRow=" & startRow & "; docRow=" & docRow
     ShiftTopRow = 0
+End Function
+
+'--- 医師数行: 備考行の NOTE_TO_DOC 行下。備考が無ければA列ラベルで探す ---
+Public Function ShiftDocRow(ByVal ws As Worksheet) As Long
+    Dim noteRow As Long
+    On Error GoTo ErrHandler
+
+10  noteRow = LabelRow(ws, LBL_NOTE)
+20  If noteRow > 0 Then
+30      ShiftDocRow = noteRow + NOTE_TO_DOC
+40  Else
+50      ShiftDocRow = LabelRow(ws, LBL_DOC)
+60  End If
+    Exit Function
+ErrHandler:
+    LogError MODULE_NAME, "ShiftDocRow", Err.Number, Err.Description, Erl, _
+             "sheet=" & ws.Name & "; noteRow=" & noteRow
+    ShiftDocRow = 0
+End Function
+
+'--- 医師名欄のブロック(A列「医師名」の行 - ★マーカー行の1行上) ---
+Public Function DoctorBlock(ByVal ws As Worksheet) As Range
+    Dim topR As Long, botR As Long, firstCol As Long, lastCol As Long
+    On Error GoTo ErrHandler
+
+10  topR = LabelRow(ws, LBL_DOCTORS)
+20  If topR = 0 Then Exit Function
+30  botR = PaletteBodyRow(ws) + MARKER_OFFSET - 1
+40  If botR < topR Then Exit Function
+50  firstCol = ws.Range(COL_FIRST & "1").Column
+60  lastCol = ws.Range(COL_LAST & "1").Column
+70  Set DoctorBlock = ws.Range(ws.Cells(topR, firstCol), ws.Cells(botR, lastCol))
+    Exit Function
+ErrHandler:
+    LogError MODULE_NAME, "DoctorBlock", Err.Number, Err.Description, Erl, _
+             "sheet=" & ws.Name & "; topRow=" & topR & "; bottomRow=" & botR
+    Set DoctorBlock = Nothing
 End Function
 
 '--- 入力欄の下端 = 医師数行の DOC_GAP 行上 ---
@@ -157,7 +233,7 @@ Public Function ShiftBottomRow(ByVal ws As Worksheet) As Long
     Dim docRow As Long
     On Error GoTo ErrHandler
 
-10  docRow = LabelRow(ws, LBL_DOC)
+10  docRow = ShiftDocRow(ws)
 20  If docRow > DOC_GAP Then ShiftBottomRow = docRow - DOC_GAP
     Exit Function
 ErrHandler:
@@ -230,7 +306,7 @@ Public Function ShiftRangeDrift(ByVal ws As Worksheet) As Long
     On Error GoTo ErrHandler
 
 10  Set rng = ShiftInputRange(ws)
-20  docRow = LabelRow(ws, LBL_DOC)
+20  docRow = ShiftDocRow(ws)
 30  If rng Is Nothing Or docRow = 0 Then Exit Function
 40  endRow = rng.Row + rng.Rows.Count - 1
 50  ShiftRangeDrift = endRow - (docRow - DOC_GAP)
