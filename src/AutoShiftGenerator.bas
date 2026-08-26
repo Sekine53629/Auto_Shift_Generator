@@ -1,6 +1,6 @@
 Option Explicit
 '==================================================================
-'  シフト自動作成  ＜標準モジュール ShiftAuto v7.2.0＞  2026-08-24
+'  シフト自動作成  ＜標準モジュール ShiftAuto v8.0.0＞  2026-08-26
 '  ルールはすべてシート「自動作成設定」から読込(K列ラベル部分一致):
 '   L5=早番(○)人数/日  L6=遅番(▲)最低人数/日(誤差-1)
 '   L7=連勤の上限  L8=連休の上限  L9=週の基本休日数
@@ -14,20 +14,20 @@ Option Explicit
 '  v6.5.0: 設定シート自動生成/差分ログ/変更を戻す/白紙化
 '  v7.0.0: 氏名が空欄の行を完全スキップ / 整合性チェック集約
 '  v7.1.0: 集計行ラベル(医師数(診)等)を氏名として扱わない IsNonName 判定
-'  v7.2.0 変更:
-'   ・入力範囲の仕様を明確化
-'       上端 = 日付行(10行)の1行下
-'       下端 = 医師数(診)の2行上   ← 医師数の1行上は緩衝行(範囲外)
-'   ・フォールバックを B11:AF25 / パレット B31:N31 に更新
-'   ・範囲チェックを「医師数の2行上を超えたら警告」に変更
-'  ※名前付き範囲「シフトパレット範囲」は現行 B11:AF25
-'    　=INDEX(シフト!$B:$B,ROW(シフト!$B$10)+1)
-'    　:INDEX(シフト!$AF:$AF,MATCH("医師数*",シフト!$A:$A,0)-2)
+'  v7.2.0: 入力範囲の仕様を明確化(下端 = 医師数の2行上)
+'  v8.0.0 変更:
+'   ・シート名/A列ラベル/列/行オフセット/範囲解決を ShiftCommon に移管
+'     ハードコードしたフォールバック番地(B11:AF25 等)を廃止し、
+'     範囲は「名前付き範囲 → A列ラベルからの計算」で決定する
+'   ・医師数行の特定を完全一致 Match から前方一致 LabelRow に変更
+'   ・重複していた ShiftGrid / AutoShiftRange / AutoPaletteRange を削除
+'   ・全プロシージャに ErrorLogger のエラーハンドラを追加
+'     (入口の Sub は LogSuccess も記録。ループ内で多数回呼ばれる
+'      ヘルパーは性能のため LogError のみ)
 '==================================================================
-Private Const CFG_SHEET As String = "自動作成設定"
-Private Const HOL_SHEET As String = "祝日マスタ"
-Private Const LOG_SHEET As String = "シフト変更ログ"
-Private Const DOC_LABEL As String = "医師数(診)"
+Private Const MODULE_NAME As String = "AutoShiftGenerator"
+
+' シート名・A列ラベル・範囲解決は ShiftCommon を参照する
 Private Const SYM_EARLY As String = "○"
 Private Const SYM_MID   As String = "●"
 Private Const SYM_LATE  As String = "▲"
@@ -38,11 +38,6 @@ Private Const KIND_CL   As String = "事務員"
 ' 氏名として扱わない集計行ラベル(前方一致・カンマ区切り)
 Private Const NON_NAME_LABELS As String = _
     "医師数,薬剤師出勤数,事務員出勤数,過不足,合計,シフトパレット"
-' 入力範囲の下端を医師数(診)から何行上にするか
-Private Const DOC_GAP   As Long = 2
-' フォールバック(名前付き範囲が壊れている場合のみ)
-Private Const FB_SHIFT   As String = "B11:AF25"
-Private Const FB_PALETTE As String = "B31:N31"
 ' 予定ステータス
 Private Const ST_SKIP  As Long = -1   ' 月外・休業・空行・集計行
 Private Const ST_WORK  As Long = 1    ' 自動:出勤
@@ -66,6 +61,7 @@ Private mNP As Long, mND As Long
 '==================================================================
 '--- 集計行のラベルか?(氏名ではない行を除外) ---
 Private Function IsNonName(ByVal s As String) As Boolean
+    On Error GoTo ErrHandler
     Dim parts() As String, p As Long, t As String
     t = Trim$(s)
     If Len(t) = 0 Then Exit Function
@@ -78,13 +74,19 @@ Private Function IsNonName(ByVal s As String) As Boolean
             End If
         End If
     Next p
+
+    Exit Function
+ErrHandler:
+    LogError MODULE_NAME, "IsNonName", Err.Number, Err.Description, Erl, _
+             "s=" & s
 End Function
 
 Public Sub シフト自動作成()
+    On Error GoTo ErrHandler
     Dim ws As Worksheet, cfg As Worksheet, holWs As Worksheet, grid As Range
     Dim i As Long, j As Long, k As Long, r As Long, w As Long, j0 As Long
     Dim dateRow As Long, docRow As Long, monthNum As Long
-    Dim mres As Variant, dayDt() As Date, targetOff As Long
+    Dim dayDt() As Date, targetOff As Long
     Dim pName() As String, pWD() As Boolean
     Dim pWeekN() As Long, pQuota() As Long, pFound() As Boolean
     Dim missing As String, unmet As String, v As String
@@ -111,19 +113,19 @@ Public Sub シフト自動作成()
     Dim nmCheck As String, hit As Long, ii As Long
 
     '=== 準備 ===
-    Set ws = Worksheets("シフト")
+    Set ws = ShiftSheet()
     On Error Resume Next
-    Set cfg = Worksheets(CFG_SHEET)
-    Set holWs = Worksheets(HOL_SHEET)
-    On Error GoTo 0
+    Set cfg = Worksheets(SHT_CFG)
+    Set holWs = Worksheets(SHT_HOLIDAY)
+    On Error GoTo ErrHandler
     If cfg Is Nothing Then
-        If MsgBox("設定シート「" & CFG_SHEET & "」がありません。" & vbCrLf & _
+        If MsgBox("設定シート「" & SHT_CFG & "」がありません。" & vbCrLf & _
                   "既定値で自動生成しますか?(氏名はシフト表から取込)" & vbCrLf & vbCrLf & _
                   "※生成後、区分(事務員)・固定曜日・週N日・手動(派遣)・" & vbCrLf & _
                   "　休業・遅番不可 は手動で設定してください。", _
                   vbYesNo + vbQuestion, "設定シート自動生成") = vbYes Then
             Set cfg = BuildCfgSheet(ws)
-            MsgBox "設定シート「" & CFG_SHEET & "」を既定値で生成しました。" & vbCrLf & _
+            MsgBox "設定シート「" & SHT_CFG & "」を既定値で生成しました。" & vbCrLf & _
                    "内容を確認・修正のうえ、もう一度実行してください。", vbInformation
         End If
         Exit Sub
@@ -147,20 +149,24 @@ Public Sub シフト自動作成()
     If mMaxOffRun < 1 Then mMaxOffRun = 1
     If weekBase < 0 Then weekBase = 0
 
-    Set grid = AutoShiftRange(ws)
+    Set grid = ShiftInputRange(ws)
+    If grid Is Nothing Then
+        MsgBox "シフト入力欄を特定できません。" & vbCrLf & _
+               "A列の「" & LBL_NAME & "」「" & LBL_WEEK & "」「" & LBL_DOC & _
+               "」を確認してください。", vbExclamation: Exit Sub
+    End If
     mNP = grid.Rows.Count: mND = grid.Columns.Count
     dateRow = grid.Row - 1
-    mres = Application.Match(DOC_LABEL, ws.Columns(1), 0)
-    If IsError(mres) Then
-        MsgBox "「" & DOC_LABEL & "」行が見つかりません。", vbExclamation: Exit Sub
+    docRow = LabelRow(ws, LBL_DOC)
+    If docRow = 0 Then
+        MsgBox "「" & LBL_DOC & "」行が見つかりません。", vbExclamation: Exit Sub
     End If
-    docRow = CLng(mres)
     '--- 入力範囲が集計行に近すぎないか確認(下端は医師数の2行上まで) ---
     If grid.Row + mNP - 1 > docRow - DOC_GAP Then
         MsgBox "シフト入力範囲(" & grid.Address(False, False) & ")が" & vbCrLf & _
-               "「" & DOC_LABEL & "」行(" & docRow & "行)の" & DOC_GAP & "行上を超えています。" & vbCrLf & vbCrLf & _
+               "「" & LBL_DOC & "」行(" & docRow & "行)の" & DOC_GAP & "行上を超えています。" & vbCrLf & vbCrLf & _
                "名前付き範囲「シフトパレット範囲」の終端を" & vbCrLf & _
-               "「" & DOC_LABEL & "」の" & DOC_GAP & "行上(" & (docRow - DOC_GAP) & "行)に修正してください。" & vbCrLf & _
+               "「" & LBL_DOC & "」の" & DOC_GAP & "行上(" & (docRow - DOC_GAP) & "行)に修正してください。" & vbCrLf & _
                "(集計行は氏名として扱われないため処理は続行できます)", vbExclamation
     End If
     monthNum = Month(ws.Range("A1").Value)
@@ -737,6 +743,14 @@ Public Sub シフト自動作成()
     msg = msg & vbCrLf & "変更ログ: セッション#" & sess & " に " & logged & "セル記録。" & vbCrLf & _
           "取り消すには「シフト変更を戻す」を実行してください。"
     MsgBox msg, vbInformation, "シフト自動作成 結果"
+
+    LogSuccess MODULE_NAME, "シフト自動作成", _
+               "Generated shift for " & Format(ws.Range("A1").Value, "yyyy-mm") & _
+               "; cells written=" & written
+    Exit Sub
+ErrHandler:
+    LogError MODULE_NAME, "シフト自動作成", Err.Number, Err.Description, Erl, _
+             ""
 End Sub
 
 '==================================================================
@@ -744,29 +758,33 @@ End Sub
 '   実行せずに、シフト表とマスタの対応だけを確認できます
 '==================================================================
 Public Sub シフト設定チェック()
+    On Error GoTo ErrHandler
     Dim ws As Worksheet, cfg As Worksheet, grid As Range
     Dim i As Long, r As Long, nm As String, kd As String
     Dim nmList() As String, nN As Long, ii As Long, hit As Long
     Dim missing As String, orphan As String, dupName As String, badKind As String
     Dim blankRows As String, labelRows As String, msg As String
-    Dim mres As Variant, docRow As Long, warnRange As String
-    Set ws = Worksheets("シフト")
+    Dim docRow As Long, drift As Long, warnRange As String
+    Set ws = ShiftSheet()
     On Error Resume Next
-    Set cfg = Worksheets(CFG_SHEET)
-    On Error GoTo 0
+    Set cfg = Worksheets(SHT_CFG)
+    On Error GoTo ErrHandler
     If cfg Is Nothing Then
-        MsgBox "設定シート「" & CFG_SHEET & "」がありません。", vbExclamation: Exit Sub
+        MsgBox "設定シート「" & SHT_CFG & "」がありません。", vbExclamation: Exit Sub
     End If
-    Set grid = AutoShiftRange(ws)
-    '--- 範囲が集計行に近すぎないか(下端は医師数の2行上まで) ---
-    mres = Application.Match(DOC_LABEL, ws.Columns(1), 0)
-    If Not IsError(mres) Then
-        docRow = CLng(mres)
-        If grid.Row + grid.Rows.Count - 1 > docRow - DOC_GAP Then
-            warnRange = "■ 入力範囲が「" & DOC_LABEL & "」行(" & docRow & "行)の" & _
-                        DOC_GAP & "行上を超えています" & vbCrLf & _
-                        "　終端は " & (docRow - DOC_GAP) & "行 が正しい位置です" & vbCrLf & vbCrLf
-        End If
+    Set grid = ShiftInputRange(ws)
+    If grid Is Nothing Then
+        MsgBox "シフト入力欄を特定できません。" & vbCrLf & _
+               "A列の「" & LBL_NAME & "」「" & LBL_WEEK & "」「" & LBL_DOC & _
+               "」を確認してください。", vbExclamation: Exit Sub
+    End If
+    '--- 範囲が集計行に近すぎないか(下端は医師数の DOC_GAP 行上まで) ---
+    docRow = LabelRow(ws, LBL_DOC)
+    drift = ShiftRangeDrift(ws)
+    If docRow > 0 And drift > 0 Then
+        warnRange = "■ 入力範囲が「" & LBL_DOC & "」行(" & docRow & "行)の" & _
+                    DOC_GAP & "行上を " & drift & " 行超えています" & vbCrLf & _
+                    "　終端は " & (docRow - DOC_GAP) & "行 が正しい位置です" & vbCrLf & vbCrLf
     End If
     ReDim nmList(1 To grid.Rows.Count): nN = 0
     For i = 1 To grid.Rows.Count
@@ -811,7 +829,7 @@ Public Sub シフト設定チェック()
         r = r + 1
     Loop
     msg = "シフト入力範囲 : " & grid.Address(False, False) & vbCrLf & _
-          "　(上端=日付行の1行下 / 下端=" & DOC_LABEL & "の" & DOC_GAP & "行上)" & vbCrLf & _
+          "　(上端=日付行の1行下 / 下端=" & LBL_DOC & "の" & DOC_GAP & "行上)" & vbCrLf & _
           "対象者(氏名有) : " & nN & "名" & vbCrLf & _
           "空行(スキップ) : " & IIf(Len(blankRows) > 0, blankRows, "なし") & vbCrLf & _
           "集計行(除外)   : " & IIf(Len(labelRows) > 0, labelRows, "なし") & vbCrLf & vbCrLf
@@ -825,6 +843,12 @@ Public Sub シフト設定チェック()
         msg = msg & "整合性の問題は見つかりませんでした。"
     End If
     MsgBox msg, vbInformation, "シフト設定チェック"
+
+    LogSuccess MODULE_NAME, "シフト設定チェック", "Checked settings: names=" & nN & "; range=" & grid.Address(False, False)
+    Exit Sub
+ErrHandler:
+    LogError MODULE_NAME, "シフト設定チェック", Err.Number, Err.Description, Erl, _
+             ""
 End Sub
 
 '==================================================================
@@ -832,13 +856,14 @@ End Sub
 '==================================================================
 '--- ログシート取得(無ければ作成) ---
 Private Function GetLogSheet() As Worksheet
+    On Error GoTo ErrHandler
     Dim lg As Worksheet
     On Error Resume Next
-    Set lg = Worksheets(LOG_SHEET)
-    On Error GoTo 0
+    Set lg = Worksheets(SHT_LOG)
+    On Error GoTo ErrHandler
     If lg Is Nothing Then
         Set lg = Worksheets.Add(After:=Worksheets(Worksheets.Count))
-        lg.Name = LOG_SHEET
+        lg.Name = SHT_LOG
         lg.Range("A1:J1").Value = Array("セッション", "日時", "操作", "セル", _
             "変更前", "変更後", "取消済", "前文字色", "前太字", "前塗り色")
         lg.Range("A1:J1").Font.Bold = True
@@ -848,19 +873,37 @@ Private Function GetLogSheet() As Worksheet
         lg.Columns("A:J").AutoFit
     End If
     Set GetLogSheet = lg
+
+    Exit Function
+ErrHandler:
+    LogError MODULE_NAME, "GetLogSheet", Err.Number, Err.Description, Erl, _
+             ""
 End Function
 Private Function LogLastRow(ByVal lg As Worksheet) As Long
+    On Error GoTo ErrHandler
     LogLastRow = lg.Cells(lg.Rows.Count, 1).End(xlUp).Row
     If LogLastRow < 1 Then LogLastRow = 1
+
+    Exit Function
+ErrHandler:
+    LogError MODULE_NAME, "LogLastRow", Err.Number, Err.Description, Erl, _
+             ""
 End Function
 Private Function NextSession(ByVal lg As Worksheet) As Long
+    On Error GoTo ErrHandler
     Dim lr As Long
     lr = LogLastRow(lg)
     If lr < 2 Then NextSession = 1 Else NextSession = CLng(Val(lg.Cells(lr, 1).Value)) + 1
+
+    Exit Function
+ErrHandler:
+    LogError MODULE_NAME, "NextSession", Err.Number, Err.Description, Erl, _
+             ""
 End Function
 '--- 1セル分の差分を記録(変更前の値と書式を保存してから書き換える前提) ---
 Private Sub LogChange(ByVal lg As Worksheet, ByRef lr As Long, ByVal sess As Long, _
                       ByVal op As String, ByVal c As Range, ByVal newV As String)
+    On Error GoTo ErrHandler
     lr = lr + 1
     lg.Cells(lr, 1).Value = sess
     lg.Cells(lr, 2).Value = Now
@@ -871,16 +914,22 @@ Private Sub LogChange(ByVal lg As Worksheet, ByRef lr As Long, ByVal sess As Lon
     lg.Cells(lr, 8).Value = c.Font.Color
     lg.Cells(lr, 9).Value = IIf(c.Font.Bold, "TRUE", "FALSE")
     If c.Interior.Pattern <> xlNone Then lg.Cells(lr, 10).Value = c.Interior.Color
+
+    Exit Sub
+ErrHandler:
+    LogError MODULE_NAME, "LogChange", Err.Number, Err.Description, Erl, _
+             "lr=" & lr & "; sess=" & sess & "; op=" & op & "; newV=" & newV
 End Sub
 '--- 最後のセッションを逆再生して復元(繰り返し実行で1回ずつ遡れる) ---
 Public Sub シフト変更を戻す()
+    On Error GoTo ErrHandler
     Dim ws As Worksheet, lg As Worksheet, lr As Long, r As Long
     Dim sess As Long, cnt As Long, c As Range, oldV As String
     Dim op As String, tm As String
-    Set ws = Worksheets("シフト")
+    Set ws = ShiftSheet()
     On Error Resume Next
-    Set lg = Worksheets(LOG_SHEET)
-    On Error GoTo 0
+    Set lg = Worksheets(SHT_LOG)
+    On Error GoTo ErrHandler
     If lg Is Nothing Then
         MsgBox "変更ログがありません。" & vbCrLf & _
                "(ログは「シフト自動作成」「シフト白紙化」の実行時に記録されます)", vbExclamation
@@ -931,14 +980,26 @@ Public Sub シフト変更を戻す()
     Application.EnableEvents = True
     MsgBox "セッション#" & sess & "「" & op & "」を取り消しました(" & cnt & "セル復元)。" & vbCrLf & _
            "さらに前の状態へ戻すには、もう一度実行してください。", vbInformation
+
+    LogSuccess MODULE_NAME, "シフト変更を戻す", "Reverted session #" & sess & " (" & cnt & " cells)"
+    Exit Sub
+ErrHandler:
+    LogError MODULE_NAME, "シフト変更を戻す", Err.Number, Err.Description, Erl, _
+             ""
 End Sub
 '--- 入力欄を白紙化(数式セルは保護・全消去分をログに記録=復元可) ---
 Public Sub シフト白紙化()
+    On Error GoTo ErrHandler
     Dim ws As Worksheet, grid As Range, c As Range
     Dim lg As Worksheet, sess As Long, lr As Long, cnt As Long
     Dim hasVal As Boolean, hasFmt As Boolean
-    Set ws = Worksheets("シフト")
-    Set grid = AutoShiftRange(ws)
+    Set ws = ShiftSheet()
+    Set grid = ShiftInputRange(ws)
+    If grid Is Nothing Then
+        MsgBox "シフト入力欄を特定できません。" & vbCrLf & _
+               "A列の「" & LBL_NAME & "」「" & LBL_WEEK & "」「" & LBL_DOC & _
+               "」を確認してください。", vbExclamation: Exit Sub
+    End If
     If MsgBox("シフト入力欄(" & grid.Address(False, False) & ")の入力をすべて消去します。" & vbCrLf & _
               "消去内容は変更ログに記録され、「シフト変更を戻す」で復元できます。" & vbCrLf & _
               "よろしいですか?", vbYesNo + vbExclamation, "シフト白紙化") <> vbYes Then Exit Sub
@@ -969,6 +1030,12 @@ Public Sub シフト白紙化()
         MsgBox "白紙にしました(セッション#" & sess & "・" & cnt & "セル記録)。" & vbCrLf & _
                "元に戻すには「シフト変更を戻す」を実行してください。", vbInformation
     End If
+
+    LogSuccess MODULE_NAME, "シフト白紙化", "Cleared " & cnt & " cells in " & grid.Address(False, False)
+    Exit Sub
+ErrHandler:
+    LogError MODULE_NAME, "シフト白紙化", Err.Number, Err.Description, Erl, _
+             ""
 End Sub
 
 '==================================================================
@@ -976,10 +1043,12 @@ End Sub
 '==================================================================
 '--- 設定シートを既定値で自動生成(氏名はシフト表の行から取込) ---
 Private Function BuildCfgSheet(ByVal ws As Worksheet) As Worksheet
+    On Error GoTo ErrHandler
     Dim cfg As Worksheet, grid As Range, i As Long, r As Long, nm As String
-    Set grid = AutoShiftRange(ws)
+    Set grid = ShiftInputRange(ws)
+    If grid Is Nothing Then Exit Function
     Set cfg = Worksheets.Add(After:=Worksheets(Worksheets.Count))
-    cfg.Name = CFG_SHEET
+    cfg.Name = SHT_CFG
     cfg.Range("A1").Value = "シフト自動作成 設定"
     cfg.Range("A1").Font.Bold = True: cfg.Range("A1").Font.size = 14
     cfg.Range("A2").Value = "希望休はシフト表に「希休」スタンプで入力してください。実行時、入力済みのセルはすべて保持され、空白セルのみ自動で埋まります。"
@@ -1020,12 +1089,19 @@ Private Function BuildCfgSheet(ByVal ws As Worksheet) As Worksheet
     cfg.Range("A4:I4,K4:L4").Interior.Color = RGB(217, 217, 217)
     cfg.Columns("A:L").AutoFit
     Set BuildCfgSheet = cfg
+
+    LogSuccess MODULE_NAME, "BuildCfgSheet", "Built config sheet with " & (r - 5) & " member rows"
+    Exit Function
+ErrHandler:
+    LogError MODULE_NAME, "BuildCfgSheet", Err.Number, Err.Description, Erl, _
+             ""
 End Function
 
 '==================================================================
 ' 設定読込ヘルパー(K列ラベルの部分一致 → L列の値)
 '==================================================================
 Private Function CfgNum(ByVal cfg As Worksheet, ByVal key As String, ByVal dft As Double) As Double
+    On Error GoTo ErrHandler
     Dim r As Long
     For r = 4 To 30
         If InStr(CStr(cfg.Cells(r, 11).Value), key) > 0 Then
@@ -1038,8 +1114,14 @@ Private Function CfgNum(ByVal cfg As Worksheet, ByVal key As String, ByVal dft A
         End If
     Next r
     CfgNum = dft
+
+    Exit Function
+ErrHandler:
+    LogError MODULE_NAME, "CfgNum", Err.Number, Err.Description, Erl, _
+             "key=" & key & "; dft=" & dft
 End Function
 Private Function CfgTxt(ByVal cfg As Worksheet, ByVal key As String, ByVal dft As String) As String
+    On Error GoTo ErrHandler
     Dim r As Long
     For r = 4 To 30
         If InStr(CStr(cfg.Cells(r, 11).Value), key) > 0 Then
@@ -1050,6 +1132,11 @@ Private Function CfgTxt(ByVal cfg As Worksheet, ByVal key As String, ByVal dft A
         End If
     Next r
     CfgTxt = dft
+
+    Exit Function
+ErrHandler:
+    LogError MODULE_NAME, "CfgTxt", Err.Number, Err.Description, Erl, _
+             "key=" & key & "; dft=" & dft
 End Function
 
 '==================================================================
@@ -1057,15 +1144,22 @@ End Function
 '==================================================================
 '--- 予定出勤数の更新(薬剤師/事務員 別) ---
 Private Sub CovAdd(ByVal i As Long, ByVal j As Long, ByVal d As Long)
+    On Error GoTo ErrHandler
     If mSkipRow(i) Then Exit Sub
     If mKind(i) = KIND_PH Then
         mCov(j) = mCov(j) + d
     ElseIf mKind(i) = KIND_CL Then
         mCovG(j) = mCovG(j) + d
     End If
+
+    Exit Sub
+ErrHandler:
+    LogError MODULE_NAME, "CovAdd", Err.Number, Err.Description, Erl, _
+             "i=" & i & "; j=" & j & "; d=" & d
 End Sub
 '--- ノルマ外の休み記号(L11・カンマ区切り・部分一致) ---
 Private Function IsPaidOff(ByVal v As String) As Boolean
+    On Error GoTo ErrHandler
     Dim parts() As String, p As Long
     parts = Split(Replace(mPaidSyms, "、", ","), ",")
     For p = LBound(parts) To UBound(parts)
@@ -1073,9 +1167,15 @@ Private Function IsPaidOff(ByVal v As String) As Boolean
             If InStr(v, Trim$(parts(p))) > 0 Then IsPaidOff = True: Exit Function
         End If
     Next p
+
+    Exit Function
+ErrHandler:
+    LogError MODULE_NAME, "IsPaidOff", Err.Number, Err.Description, Erl, _
+             "v=" & v
 End Function
 '--- その日を休みにする良さ(大きいほど休み向き) ---
 Private Function OffScore(ByVal i As Long, ByVal j As Long) As Double
+    On Error GoTo ErrHandler
     Dim s As Double, L As Long, lft As Long, rgt As Long
     If mKind(i) = KIND_PH Then
         s = s + 5# * (mCov(j) - 1 - mDayReq(j))          ' 不足を日別に均す(ソフト)
@@ -1091,9 +1191,15 @@ Private Function OffScore(ByVal i As Long, ByVal j As Long) As Double
     If L >= mMaxRun + 1 Then s = s + 8 + IIf(lft < rgt, lft, rgt)
     If mDayWD(j) = 1 Or mDayWD(j) = 7 Or mDayHol(j) Then s = s + 2
     OffScore = s
+
+    Exit Function
+ErrHandler:
+    LogError MODULE_NAME, "OffScore", Err.Number, Err.Description, Erl, _
+             "i=" & i & "; j=" & j
 End Function
 '--- 既存休に隣接して連休(上限内)になる位置を優遇 ---
 Private Function AdjBonus(ByVal i As Long, ByVal j As Long) As Double
+    On Error GoTo ErrHandler
     Dim total As Long
     total = 1 + OffRunBefore(i, j) + OffRunAfter(i, j)
     If total >= 2 And total <= mMaxOffRun Then
@@ -1101,9 +1207,15 @@ Private Function AdjBonus(ByVal i As Long, ByVal j As Long) As Double
     ElseIf total > mMaxOffRun Then
         AdjBonus = -3 * (total - mMaxOffRun)
     End If
+
+    Exit Function
+ErrHandler:
+    LogError MODULE_NAME, "AdjBonus", Err.Number, Err.Description, Erl, _
+             "i=" & i & "; j=" & j
 End Function
 '--- 指定週内に size 日連続の公休ブロックを最良位置へ ---
 Private Function PlaceOffBlock(ByVal i As Long, ByVal wk As Long, ByVal size As Long) As Boolean
+    On Error GoTo ErrHandler
     Dim j As Long, k As Long, ok As Boolean
     Dim s As Double, bs As Double, bj As Long, offRun As Long
     bj = 0: bs = -1E+30
@@ -1132,9 +1244,15 @@ Private Function PlaceOffBlock(ByVal i As Long, ByVal wk As Long, ByVal size As 
         Next k
         PlaceOffBlock = True
     End If
+
+    Exit Function
+ErrHandler:
+    LogError MODULE_NAME, "PlaceOffBlock", Err.Number, Err.Description, Erl, _
+             "i=" & i & "; wk=" & wk & "; size=" & size
 End Function
 '--- 指定週内に公休1日を最良位置へ(既存休に寄せる) ---
 Private Function PlaceOffSingle(ByVal i As Long, ByVal wk As Long) As Boolean
+    On Error GoTo ErrHandler
     Dim j As Long, bj As Long, bs As Double, sc As Double
     bj = 0: bs = -1E+30
     For j = 1 To mND
@@ -1148,9 +1266,15 @@ Private Function PlaceOffSingle(ByVal i As Long, ByVal wk As Long) As Boolean
         CovAdd i, bj, -1
         PlaceOffSingle = True
     End If
+
+    Exit Function
+ErrHandler:
+    LogError MODULE_NAME, "PlaceOffSingle", Err.Number, Err.Description, Erl, _
+             "i=" & i & "; wk=" & wk
 End Function
 '--- 連勤上限超えの緩和: 連勤の中央を休みにし、他の自動公休と入替 ---
 Private Sub RepairRuns(ByVal i As Long)
+    On Error GoTo ErrHandler
     Dim j As Long, L As Long, lft As Long, rgt As Long
     Dim ctr As Long, off As Long, k As Long, cand As Long, bk As Long, bs As Double, sc As Double
     j = 1
@@ -1192,9 +1316,15 @@ Private Sub RepairRuns(ByVal i As Long)
             j = j + 1
         End If
     Loop
+
+    Exit Sub
+ErrHandler:
+    LogError MODULE_NAME, "RepairRuns", Err.Number, Err.Description, Erl, _
+             "i=" & i
 End Sub
 '--- 医師5名日の出勤を均等化(通常ルールの薬剤師間で誤差1以内を目標) ---
 Private Sub FiveBalance()
+    On Error GoTo ErrHandler
     Dim pass As Long, i As Long, j As Long, f As Long
     Dim mxI As Long, mnI As Long, mxV As Long, mnV As Long
     Dim d5 As Long, dx As Long, swapped As Boolean
@@ -1244,9 +1374,15 @@ Private Sub FiveBalance()
         End If
         If Not swapped Then Exit Sub
     Next pass
+
+    Exit Sub
+ErrHandler:
+    LogError MODULE_NAME, "FiveBalance", Err.Number, Err.Description, Erl, _
+             ""
 End Sub
 '--- ○●▲の個人差を均等化(誤差2以内を目標・同じ日の2人で記号を交換) ---
 Private Sub SymbolBalance()
+    On Error GoTo ErrHandler
     Dim pass As Long, s As Long, i As Long, j As Long
     Dim mxI As Long, mnI As Long, mxV As Long, mnV As Long, c As Long
     Dim sym As String, other As String, done As Boolean
@@ -1285,22 +1421,40 @@ Private Sub SymbolBalance()
         Next s
         If done Then Exit For
     Next pass
+
+    Exit Sub
+ErrHandler:
+    LogError MODULE_NAME, "SymbolBalance", Err.Number, Err.Description, Erl, _
+             ""
 End Sub
 Private Function SymCnt(ByVal i As Long, ByVal sym As String) As Long
+    On Error GoTo ErrHandler
     If sym = SYM_EARLY Then SymCnt = mCntE(i)
     If sym = SYM_MID Then SymCnt = mCntM(i)
     If sym = SYM_LATE Then SymCnt = mCntL(i)
+
+    Exit Function
+ErrHandler:
+    LogError MODULE_NAME, "SymCnt", Err.Number, Err.Description, Erl, _
+             "i=" & i & "; sym=" & sym
 End Function
 Private Sub AddCnt(ByVal i As Long, ByVal sym As String, ByVal d As Long)
+    On Error GoTo ErrHandler
     If sym = SYM_EARLY Then mCntE(i) = mCntE(i) + d
     If sym = SYM_MID Then mCntM(i) = mCntM(i) + d
     If sym = SYM_LATE Then mCntL(i) = mCntL(i) + d
+
+    Exit Sub
+ErrHandler:
+    LogError MODULE_NAME, "AddCnt", Err.Number, Err.Description, Erl, _
+             "i=" & i & "; sym=" & sym & "; d=" & d
 End Sub
 
 '==================================================================
 ' 計測ヘルパー
 '==================================================================
 Private Function RunLenAt(ByVal i As Long, ByVal j As Long, ByRef lft As Long, ByRef rgt As Long) As Long
+    On Error GoTo ErrHandler
     Dim a As Long, b As Long
     a = j: b = j
     Do While a > 1
@@ -1311,8 +1465,14 @@ Private Function RunLenAt(ByVal i As Long, ByVal j As Long, ByRef lft As Long, B
     Loop
     lft = j - a: rgt = b - j
     RunLenAt = b - a + 1
+
+    Exit Function
+ErrHandler:
+    LogError MODULE_NAME, "RunLenAt", Err.Number, Err.Description, Erl, _
+             "i=" & i & "; j=" & j & "; lft=" & lft & "; rgt=" & rgt
 End Function
 Private Function WorkRunIf(ByVal i As Long, ByVal k As Long) As Long
+    On Error GoTo ErrHandler
     Dim a As Long, b As Long
     a = k: b = k
     Do While a > 1
@@ -1322,8 +1482,14 @@ Private Function WorkRunIf(ByVal i As Long, ByVal k As Long) As Long
         If mPlan(i, b + 1) = ST_WORK Or mPlan(i, b + 1) = ST_FWORK Then b = b + 1 Else Exit Do
     Loop
     WorkRunIf = b - a + 1
+
+    Exit Function
+ErrHandler:
+    LogError MODULE_NAME, "WorkRunIf", Err.Number, Err.Description, Erl, _
+             "i=" & i & "; k=" & k
 End Function
 Private Function OffRunBefore(ByVal i As Long, ByVal j As Long) As Long
+    On Error GoTo ErrHandler
     Dim a As Long
     a = j - 1
     Do While a >= 1
@@ -1333,8 +1499,14 @@ Private Function OffRunBefore(ByVal i As Long, ByVal j As Long) As Long
             Exit Do
         End If
     Loop
+
+    Exit Function
+ErrHandler:
+    LogError MODULE_NAME, "OffRunBefore", Err.Number, Err.Description, Erl, _
+             "i=" & i & "; j=" & j
 End Function
 Private Function OffRunAfter(ByVal i As Long, ByVal j As Long) As Long
+    On Error GoTo ErrHandler
     Dim b As Long
     b = j + 1
     Do While b <= mND
@@ -1344,16 +1516,28 @@ Private Function OffRunAfter(ByVal i As Long, ByVal j As Long) As Long
             Exit Do
         End If
     Loop
+
+    Exit Function
+ErrHandler:
+    LogError MODULE_NAME, "OffRunAfter", Err.Number, Err.Description, Erl, _
+             "i=" & i & "; j=" & j
 End Function
 Private Function FiveCnt(ByVal i As Long) As Long
+    On Error GoTo ErrHandler
     Dim j As Long
     For j = 1 To mND
         If mDayIn(j) And mDayDoc(j) = 5 Then
             If mPlan(i, j) = ST_WORK Or mPlan(i, j) = ST_FWORK Then FiveCnt = FiveCnt + 1
         End If
     Next j
+
+    Exit Function
+ErrHandler:
+    LogError MODULE_NAME, "FiveCnt", Err.Number, Err.Description, Erl, _
+             "i=" & i
 End Function
 Private Function FiveAvg() As Double
+    On Error GoTo ErrHandler
     Dim i As Long, t As Long, c As Long
     For i = 1 To mNP
         If Not mSkipRow(i) Then
@@ -1363,8 +1547,14 @@ Private Function FiveAvg() As Double
         End If
     Next i
     If c > 0 Then FiveAvg = t / c
+
+    Exit Function
+ErrHandler:
+    LogError MODULE_NAME, "FiveAvg", Err.Number, Err.Description, Erl, _
+             ""
 End Function
 Private Function MaxRun(ByVal i As Long) As Long
+    On Error GoTo ErrHandler
     Dim j As Long, cur As Long
     For j = 1 To mND
         If mPlan(i, j) = ST_WORK Or mPlan(i, j) = ST_FWORK Then
@@ -1374,8 +1564,14 @@ Private Function MaxRun(ByVal i As Long) As Long
             cur = 0
         End If
     Next j
+
+    Exit Function
+ErrHandler:
+    LogError MODULE_NAME, "MaxRun", Err.Number, Err.Description, Erl, _
+             "i=" & i
 End Function
 Private Function MaxOffRun(ByVal i As Long) As Long
+    On Error GoTo ErrHandler
     Dim j As Long, cur As Long
     For j = 1 To mND
         If mPlan(i, j) = ST_OFF Or mPlan(i, j) = ST_FOFF Then
@@ -1385,28 +1581,22 @@ Private Function MaxOffRun(ByVal i As Long) As Long
             cur = 0
         End If
     Next j
+
+    Exit Function
+ErrHandler:
+    LogError MODULE_NAME, "MaxOffRun", Err.Number, Err.Description, Erl, _
+             "i=" & i
 End Function
 
 '==================================================================
 ' 共通ヘルパー(動的範囲・スタンプ)
 '==================================================================
-Private Function AutoShiftRange(ByVal ws As Worksheet) As Range
-    On Error Resume Next
-    Set AutoShiftRange = ws.Parent.Names("シフトパレット範囲").RefersToRange
-    On Error GoTo 0
-    If AutoShiftRange Is Nothing Then Set AutoShiftRange = ws.Range(FB_SHIFT)
-End Function
-Private Function AutoPaletteRange(ByVal ws As Worksheet) As Range
-    On Error Resume Next
-    Set AutoPaletteRange = ws.Parent.Names("シフトパレット").RefersToRange
-    On Error GoTo 0
-    If AutoPaletteRange Is Nothing Then Set AutoPaletteRange = ws.Range(FB_PALETTE)
-End Function
 Private Sub StampCell(ByVal ws As Worksheet, ByVal c As Range, ByVal v As String)
+    On Error GoTo ErrHandler
     Dim pal As Range, i As Long, src As Range
     If c.HasFormula Then Exit Sub
     If Len(v) = 0 Then Exit Sub
-    Set pal = AutoPaletteRange(ws)
+    Set pal = PaletteRange(ws)
     For i = 1 To pal.Cells.Count
         If Trim$(CStr(pal.Cells(1, i).Value)) = v Then Set src = pal.Cells(1, i): Exit For
     Next i
@@ -1416,29 +1606,38 @@ Private Sub StampCell(ByVal ws As Worksheet, ByVal c As Range, ByVal v As String
         c.Font.Bold = src.Font.Bold
         If src.Interior.Pattern <> xlNone Then c.Interior.Color = src.Interior.Color
     End If
+
+    Exit Sub
+ErrHandler:
+    LogError MODULE_NAME, "StampCell", Err.Number, Err.Description, Erl, _
+             "v=" & v
 End Sub
 Private Sub ParseWD(ByVal s As String, ByRef pWD() As Boolean, ByVal i As Long)
+    On Error GoTo ErrHandler
     Dim k As Long, w As Long
     Const WDS As String = "日月火水木金土"
     For k = 1 To Len(Trim$(s))
         w = InStr(WDS, Mid$(Trim$(s), k, 1))
         If w >= 1 And w <= 7 Then pWD(i, w) = True
     Next k
+
+    Exit Sub
+ErrHandler:
+    LogError MODULE_NAME, "ParseWD", Err.Number, Err.Description, Erl, _
+             "s=" & s & "; i=" & i
 End Sub
 
 '==================================================================
 ' 手動変更ログ(シートモジュール「シフト」から呼び出し)
 '==================================================================
-Public Function ShiftGrid() As Range
-    Set ShiftGrid = AutoShiftRange(Worksheets("シフト"))
-End Function
 '--- 手動変更を1セッションとして記録(複数セル同時変更=同一セッション) ---
 Public Sub LogManualSession(ByVal addrs As Variant, ByVal oldVals As Variant, _
                             ByVal oldFonts As Variant, ByVal oldBolds As Variant, _
                             ByVal oldFills As Variant, ByVal n As Long)
+    On Error GoTo ErrHandler
     Dim lg As Worksheet, lr As Long, sess As Long, k As Long
     Dim ws As Worksheet, c As Range
-    Set ws = Worksheets("シフト")
+    Set ws = ShiftSheet()
     Set lg = GetLogSheet()
     lr = LogLastRow(lg)
     sess = NextSession(lg)
@@ -1457,13 +1656,20 @@ Public Sub LogManualSession(ByVal addrs As Variant, ByVal oldVals As Variant, _
             If Not IsEmpty(oldFills(k)) Then lg.Cells(lr, 10).Value = oldFills(k)
         End If
     Next k
+
+    LogSuccess MODULE_NAME, "LogManualSession", "Logged manual change session for " & n & " cells"
+    Exit Sub
+ErrHandler:
+    LogError MODULE_NAME, "LogManualSession", Err.Number, Err.Description, Erl, _
+             "n=" & n
 End Sub
 '--- ログ全消去(期替わり用リセット) ---
 Public Sub シフトログリセット(Optional ByVal ask As Boolean = True)
+    On Error GoTo ErrHandler
     Dim lg As Worksheet, lr As Long
     On Error Resume Next
-    Set lg = Worksheets(LOG_SHEET)
-    On Error GoTo 0
+    Set lg = Worksheets(SHT_LOG)
+    On Error GoTo ErrHandler
     If lg Is Nothing Then Exit Sub
     lr = lg.Cells(lg.Rows.Count, 1).End(xlUp).Row
     If lr < 2 Then Exit Sub
@@ -1473,4 +1679,10 @@ Public Sub シフトログリセット(Optional ByVal ask As Boolean = True)
                   vbYesNo + vbExclamation, "シフトログ リセット") <> vbYes Then Exit Sub
     End If
     lg.Rows("2:" & lr).Delete
+
+    LogSuccess MODULE_NAME, "シフトログリセット", "Cleared change log (" & lr - 1 & " rows)"
+    Exit Sub
+ErrHandler:
+    LogError MODULE_NAME, "シフトログリセット", Err.Number, Err.Description, Erl, _
+             "ask=" & ask
 End Sub
