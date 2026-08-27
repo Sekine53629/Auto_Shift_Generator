@@ -136,6 +136,7 @@ Public Sub シフト自動作成()
 
     '--- 7) 書き込みと結果報告 ---
 170 If Not AS_書き込み() Then Exit Sub
+175 If Not AS_休業行の塗り() Then Exit Sub
 180 If Not AS_レポート() Then Exit Sub
 
     LogSuccess MODULE_NAME, "シフト自動作成", _

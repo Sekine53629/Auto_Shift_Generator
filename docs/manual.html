@@ -34,7 +34,7 @@
 <body>
 
 <h1>くるむ薬局札幌店　シフト表 操作マニュアル</h1>
-<p class="sub">対象ファイル: くるむ薬局_シフト_自動集計版.xlsm　/　ShiftCommon v2.6・ShiftAuto v9.2.0・ShiftClick v9.3・ShiftSetup v2.4　/　2026-08-27</p>
+<p class="sub">対象ファイル: くるむ薬局_シフト_自動集計版.xlsm　/　ShiftCommon v2.7・ShiftAuto v9.2.0・ShiftClick v9.3・ShiftSetup v2.4　/　2026-08-27</p>
 
 <div class="info">
 <strong>このシステムでできること</strong><br>
@@ -54,10 +54,10 @@
 <p>VBE に取り込む標準モジュールは次の9本です。<strong>すべて入れてください</strong>（依存関係があります）。</p>
 <table>
 <tr><th style="width:170px">モジュール</th><th style="width:70px">版</th><th>役割</th></tr>
-<tr><td><code>ShiftCommon</code></td><td>v2.6</td><td><strong>共通土台。</strong>シート名・A列ラベル・列・行オフセット・シフト記号・区分・範囲解決を一元管理。他のすべてがここを参照します</td></tr>
+<tr><td><code>ShiftCommon</code></td><td>v2.7</td><td><strong>共通土台。</strong>シート名・A列ラベル・列・行オフセット・シフト記号・区分・範囲解決を一元管理。他のすべてがここを参照します</td></tr>
 <tr><td><code>ErrorLogger</code></td><td>―</td><td>エラー／成功ログの出力（<code>C:\VBAErrorLogs\</code> にCSV）</td></tr>
 <tr><td><code>ShiftAuto</code><br>(AutoShiftGenerator)</td><td>v9.2.0</td><td>シフト自動作成の入口と前半工程（準備・メンバー読込・週リスト）</td></tr>
-<tr><td><code>ShiftAutoPlace</code></td><td>v9.2.0</td><td>公休の配置・均等化アルゴリズムと記号割当・書き込み・結果レポート</td></tr>
+<tr><td><code>ShiftAutoPlace</code></td><td>v9.3.0</td><td>公休の配置・均等化アルゴリズムと記号割当・書き込み・結果レポート</td></tr>
 <tr><td><code>ShiftAutoLog</code></td><td>v9.3.0</td><td>設定チェック・変更ログ・戻す・白紙化と共通ヘルパー</td></tr>
 <tr><td><code>ShiftClick</code></td><td>v9.3</td><td>クリック入力（パレットのモード切替・スタンプ・連続切替）</td></tr>
 <tr><td><code>ShiftSchema</code></td><td>v1.1</td><td>不足シート（自動作成設定／祝日マスタ／シフト変更ログ）の生成</td></tr>
@@ -313,6 +313,7 @@ STEP 7   手修正で仕上げ
 <tr><td>入力範囲</td><td>今回処理した入力欄のアドレス。意図した範囲か確認できます</td></tr>
 <tr><td>対象者／スキップ行</td><td>氏名のある行数と、空行・集計行として除外した行数</td></tr>
 <tr><td>各人の集計</td><td>出勤／休／連勤max／連休max／医5日／○●▲の回数</td></tr>
+<tr><td>休業者の行</td><td>マスタで <code>休業</code> に○が付いている人の行が<strong>灰色</strong>になります（解除すると自動で戻ります）</td></tr>
 <tr><td>公休ノルマ未達</td><td>空きセルが足りず配置しきれなかった。手入力を減らすか休日数を見直す</td></tr>
 <tr><td>事務員が不在の日</td><td>事務員ゼロの日数。回避を試みますが不可能な場合に発生</td></tr>
 <tr><td>遅番が目標に届かない日</td><td>▲の人数が設定値（既定3名）未満の日数</td></tr>
@@ -420,7 +421,7 @@ STEP 7   手修正で仕上げ
 </table>
 
 <footer>
-くるむ薬局札幌店 シフト表 操作マニュアル　/　ShiftCommon v2.6・ShiftAuto v9.2.0・ShiftClick v9.3・ShiftSetup v2.4 準拠（各モジュールの版は1章の表を参照）<br>
+くるむ薬局札幌店 シフト表 操作マニュアル　/　ShiftCommon v2.7・ShiftAuto v9.2.0・ShiftClick v9.3・ShiftSetup v2.4 準拠（各モジュールの版は1章の表を参照）<br>
 このマニュアルはブラウザで開いて印刷・PDF保存できます。
 </footer>
 

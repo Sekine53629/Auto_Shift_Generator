@@ -1,7 +1,8 @@
 Option Explicit
 '==================================================================
-'  ShiftAutoPlace v9.2.0
+'  ShiftAutoPlace v9.3.0
 '  公休の配置・均等化アルゴリズムと後半工程。
+'  v9.3.0: AS_休業行の塗り を追加(休業者の行を灰色にする)。
 '  v9.2.0: AS_記号割当(136行)と AS_レポート(106行)を工程ごとに分割。
 '          AS_レポート が常に False を返し、呼び出し側の最終 LogSuccess に
 '          到達しなかった不具合を修正。
@@ -481,6 +482,46 @@ ErrHandler:
     AS_書き込み = False
 End Function
 
+
+
+'------------------------------------------------------------------
+' AS_休業行の塗り
+'   休業(マスタC列の○)のスタッフ行を灰色にし、解除された行は塗りを外す。
+'   休業は月ごとに変わるため、毎回すべての行を見て塗り直す。
+'
+'   塗りを外すのは「マクロが塗った色と同じ場合」だけにする。
+'   利用者がパレットの背景色ボタンで付けた色を消さないため。
+'   氏名(A列)も含めて塗る。誰が休業かを行の左端で見分けられるようにする。
+'------------------------------------------------------------------
+Public Function AS_休業行の塗り() As Boolean
+    Dim i As Long, r As Long, c As Range, rng As Range
+    Dim painted As Long, cleared As Long
+    On Error GoTo ErrHandler
+
+10  For i = 1 To mNP
+20      If Not mSkipRow(i) Then
+30          r = mGrid.Row + i - 1
+            '--- A列(氏名)から入力欄の右端まで ---
+40          Set rng = mWs.Range(mWs.Cells(r, 1), _
+                               mWs.Cells(r, mGrid.Column + mGrid.Columns.Count - 1))
+50          For Each c In rng.Cells
+60              If mLeave(i) Then
+70                  c.Interior.Color = ClrLeaveBg()
+80              ElseIf c.Interior.Pattern <> xlNone Then
+90                  If c.Interior.Color = ClrLeaveBg() Then c.Interior.Pattern = xlNone
+100             End If
+110         Next c
+120         If mLeave(i) Then painted = painted + 1 Else cleared = cleared + 1
+130     End If
+140 Next i
+
+    AS_休業行の塗り = True
+    Exit Function
+ErrHandler:
+    LogError MODULE_NAME, "AS_休業行の塗り", Err.Number, Err.Description, Erl, _
+             "i=" & i & "; row=" & r & "; painted=" & painted
+    AS_休業行の塗り = False
+End Function
 
 '------------------------------------------------------------------
 ' AS_レポート

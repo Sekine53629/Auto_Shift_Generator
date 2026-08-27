@@ -1,7 +1,9 @@
 Option Explicit
 '==================================================================
-'  シフト表 共通モジュール ＜標準モジュール ShiftCommon v2.6＞
+'  シフト表 共通モジュール ＜標準モジュール ShiftCommon v2.7＞
 '  2026-08-27
+'
+'  v2.7: 休業者のスタッフ行に使う ClrLeaveBg(#BFBFBF)を追加。
 '
 '  v2.6: v2.5 の判定が一度も True にならなかったのを修正。
 '        判定に LBL_DOCTORS("医師名")を使っていたが、パレット3行目に
@@ -454,6 +456,18 @@ Public Function ClrModeBg() As Long
     Exit Function
 ErrHandler:
     LogError MODULE_NAME, "ClrModeBg", Err.Number, Err.Description, Erl, ""
+End Function
+
+'--- 休業中のスタッフ行(#BFBFBF) ---
+'    自動作成の対象外であることを一目で分かるようにする。
+'    この色かどうかで「マクロが塗った行か」を判別するため、
+'    背景色ペイントの色とは重ならない値にすること。
+Public Function ClrLeaveBg() As Long
+    On Error GoTo ErrHandler
+    ClrLeaveBg = RGB(191, 191, 191)
+    Exit Function
+ErrHandler:
+    LogError MODULE_NAME, "ClrLeaveBg", Err.Number, Err.Description, Erl, ""
 End Function
 
 Public Function ClrMarker() As Long
