@@ -127,8 +127,8 @@ Public Sub ShiftClick_Handle(ByVal Target As Range, _
 170     Exit Sub
 180 End If
 
-    '--- 書き込み先の判定: スタッフ入力欄 または 医師名欄 ---
-190 Set grid = ShiftInputRange(ws)
+    '--- 書き込み先の判定: スタッフ入力欄+備考行 または 医師名欄 ---
+190 Set grid = EditableRange(ws)
 200 Set docBlk = DoctorBlock(ws)
 210 Set area = ClickTargetArea(ws, ClickRange(Target, EventKind), grid, docBlk, inDoc)
 220 If area Is Nothing Then Exit Sub
@@ -256,7 +256,9 @@ End Sub
 '==================================================================
 ' 内部処理
 '==================================================================
-'--- クリック先がスタッフ入力欄か医師名欄かを判定して対象範囲を返す ---
+'--- クリック先が書き込み可能な場所か判定して対象範囲を返す ---
+'    grid   = スタッフ入力欄 + 備考行 (EditableRange)
+'    docBlk = 医師名欄
 '    どちらでもなければ Nothing。inDoc は医師名欄だったかを返す。
 Private Function ClickTargetArea(ByVal ws As Worksheet, ByVal clicked As Range, _
                                  ByVal grid As Range, ByVal docBlk As Range, _
@@ -562,7 +564,7 @@ Public Sub ShiftClick_選択範囲にスタンプ()
 
 10  Set ws = ActiveSheet
 20  If Not TypeOf Selection Is Range Then Exit Sub
-30  Set grid = ShiftInputRange(ws)
+30  Set grid = EditableRange(ws)
 35  Set docBlk = DoctorBlock(ws)
 40  If grid Is Nothing And docBlk Is Nothing Then
 50      MsgBox "シフト入力欄が特定できません。" & vbCrLf & _
@@ -571,7 +573,8 @@ Public Sub ShiftClick_選択範囲にスタンプ()
 70  End If
 80  Set area = ClickTargetArea(ws, Selection, grid, docBlk, inDoc)
 90  If area Is Nothing Then
-100     MsgBox "シフト入力欄または医師名欄を選んでから実行してください。", vbExclamation
+100     MsgBox "シフト入力欄・備考行・医師名欄のいずれかを" & vbCrLf & _
+               "選んでから実行してください。", vbExclamation
 110     Exit Sub
 120 End If
 130 idx = CurrentIndex(ws)
@@ -717,6 +720,7 @@ Public Sub ShiftClick_セルフチェック()
     Dim ws As Worksheet, msg As String, srcS As String, srcP As String
     Dim grid As Range, pal As Range, drift As Long, docRow As Long
     Dim warn As String, palRow As Long, missing As String
+    Dim noteRng As Range, docBlk As Range
     On Error GoTo ErrHandler
 
 10  Set ws = ActiveSheet
@@ -735,6 +739,8 @@ Public Sub ShiftClick_セルフチェック()
 130 Set pal = PaletteRange(ws)
 140 docRow = ShiftDocRow(ws)
 150 palRow = PaletteBodyRow(ws)
+155 Set noteRng = NoteRange(ws)
+156 Set docBlk = DoctorBlock(ws)
 
     '--- 入力範囲の妥当性 ---
 160 drift = ShiftRangeDrift(ws)
@@ -764,6 +770,10 @@ Public Sub ShiftClick_セルフチェック()
               IIf(grid Is Nothing, "(未特定)", grid.Address(False, False)) & _
               "　←" & srcS & vbCrLf & _
           "　上端=再掲日付行の1行下 / 下端=" & LBL_DOC & "の" & DOC_GAP & "行上" & vbCrLf & _
+          "備考行(書込可)    : " & _
+              IIf(noteRng Is Nothing, "(未特定)", noteRng.Address(False, False)) & vbCrLf & _
+          "医師名欄(書込可)  : " & _
+              IIf(docBlk Is Nothing, "(未特定)", docBlk.Address(False, False)) & vbCrLf & _
           "パレット範囲      : " & _
               IIf(pal Is Nothing, "(未特定)", pal.Address(False, False)) & _
               "　←" & srcP & vbCrLf & _

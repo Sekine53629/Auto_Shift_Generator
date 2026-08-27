@@ -264,6 +264,8 @@ Private Function SV_WriteDetected(ByVal rpt As Worksheet, ByVal ws As Worksheet,
 210 r = SV_Row(rpt, r, Array("", "医師名欄", _
                              IIf(blk Is Nothing, "(未特定)", blk.Address(False, False)), _
                              "既定 " & DOC_BLOCK_ROWS & " 行"))
+215 r = SV_Row(rpt, r, Array("", "備考行", LabelRow(ws, LBL_NOTE), _
+                             "入力欄の外。クリック入力とログの対象"))
 220 Set grid = ShiftInputRange(ws)
 230 r = SV_Row(rpt, r, Array("", "シフト入力範囲", _
                              IIf(grid Is Nothing, "(未特定)", grid.Address(False, False))))

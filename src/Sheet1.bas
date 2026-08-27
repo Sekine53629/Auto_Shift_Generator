@@ -90,7 +90,7 @@ Private Sub Worksheet_Change(ByVal Target As Range)
 90  End If
 
     '--- 入力欄の手動変更を記録 ---
-100 Set grid = ShiftInputRange(Me)
+100 Set grid = EditableRange(Me)
 110 If grid Is Nothing Then GoTo CleanUp
 120 Set g = Application.Intersect(Target, grid)
 130 If g Is Nothing Or mN = 0 Then GoTo CleanUp
@@ -130,7 +130,7 @@ Private Sub CacheGridState(ByVal rng As Range)
     On Error GoTo ErrHandler
 
 10  mN = 0
-20  Set grid = ShiftInputRange(Me)
+20  Set grid = EditableRange(Me)
 30  If grid Is Nothing Then Exit Sub
 40  Set g = Application.Intersect(rng, grid)
 50  If g Is Nothing Then Exit Sub

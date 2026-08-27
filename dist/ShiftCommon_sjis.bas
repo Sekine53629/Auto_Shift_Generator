@@ -589,6 +589,69 @@ ErrHandler:
     Set PaletteRange = Nothing
 End Function
 
+'--- 備考行 ---
+'    シフト入力欄(スタッフの行)には含めない。自動作成の対象外であり、
+'    日ごとのメモを書く行だが、クリック入力とログの対象には含める。
+Public Function NoteRow(ByVal ws As Worksheet) As Long
+    On Error GoTo ErrHandler
+
+10  NoteRow = LabelRow(ws, LBL_NOTE)
+    Exit Function
+ErrHandler:
+    LogError MODULE_NAME, "NoteRow", Err.Number, Err.Description, Erl, _
+             "sheet=" & ws.Name
+    NoteRow = 0
+End Function
+
+'--- 備考行の入力範囲(B..AF) ---
+Public Function NoteRange(ByVal ws As Worksheet) As Range
+    Dim r As Long
+    On Error GoTo ErrHandler
+
+10  Set NoteRange = NamedRangeOrNothing(NM_NOTEROW)
+20  If Not NoteRange Is Nothing Then Exit Function
+
+30  r = NoteRow(ws)
+40  If r = 0 Then Exit Function
+50  Set NoteRange = ws.Range(COL_FIRST & r & ":" & COL_LAST & r)
+    Exit Function
+ErrHandler:
+    LogError MODULE_NAME, "NoteRange", Err.Number, Err.Description, Erl, _
+             "sheet=" & ws.Name & "; noteRow=" & r
+    Set NoteRange = Nothing
+End Function
+
+'--- 2つの範囲を結合する(片方が Nothing でも落ちない) ---
+Public Function UnionSafe(ByVal a As Range, ByVal b As Range) As Range
+    On Error GoTo ErrHandler
+
+10  If a Is Nothing Then
+20      Set UnionSafe = b
+30  ElseIf b Is Nothing Then
+40      Set UnionSafe = a
+50  Else
+60      Set UnionSafe = Application.Union(a, b)
+70  End If
+    Exit Function
+ErrHandler:
+    LogError MODULE_NAME, "UnionSafe", Err.Number, Err.Description, Erl, ""
+    Set UnionSafe = a
+End Function
+
+'--- 人が手で書き込める範囲(スタッフ入力欄 + 備考行) ---
+'    ShiftInputRange は自動作成のアルゴリズムが使う「スタッフの行」なので
+'    備考行を含めない。クリック入力と手動変更ログはこちらを使う。
+Public Function EditableRange(ByVal ws As Worksheet) As Range
+    On Error GoTo ErrHandler
+
+10  Set EditableRange = UnionSafe(ShiftInputRange(ws), NoteRange(ws))
+    Exit Function
+ErrHandler:
+    LogError MODULE_NAME, "EditableRange", Err.Number, Err.Description, Erl, _
+             "sheet=" & ws.Name
+    Set EditableRange = Nothing
+End Function
+
 '--- 入力欄の下端のずれ(0=正常 / 正=下すぎ / 負=上すぎ) ---
 Public Function ShiftRangeDrift(ByVal ws As Worksheet) As Long
     Dim rng As Range, docRow As Long, endRow As Long
