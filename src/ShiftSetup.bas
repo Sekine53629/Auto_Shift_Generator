@@ -1,6 +1,6 @@
 Option Explicit
 '==================================================================
-'  シフト表 初期設定マクロ ＜標準モジュール ShiftSetup v2.7＞
+'  シフト表 初期設定マクロ ＜標準モジュール ShiftSetup v2.8＞
 '  2026-08-27
 '  ShiftCommon / ShiftSchema / ShiftClick と併用。
 '  シート上の位置はすべて ShiftCommon が解決する。
@@ -14,6 +14,10 @@ Option Explicit
 '      3) 集計行(医師数(診)/薬剤師出勤数/過不足)の数式
 '      4) 集計列(AH:AL)の見出しと数式
 '      5) 名前付き範囲の再定義(動的数式)
+'
+'  v2.8 変更:
+'   ・パレット用の3行が無い場合、セットアップ時に自動で挿入する。
+'     白紙のブックからでも作れるようにするため。
 '
 '  v2.7 変更:
 '   ・名前付き範囲の改名にあわせ、廃止した旧名を消す工程を追加。
@@ -273,6 +277,7 @@ End Function
 Public Sub ShiftSetup_パレット生成()
     Dim ws As Worksheet, dateRowNo As Long, palRow As Long
     Dim pal As Range, vals As Variant, labs As Variant
+    Dim inserted As Long
     On Error GoTo ErrHandler
 
 10  Set ws = ShiftSheet()
@@ -282,9 +287,14 @@ Public Sub ShiftSetup_パレット生成()
 50      Exit Sub
 60  End If
 
+    '--- パレット用の行を確保する(足りなければ挿入する) ---
+    '    挿入すると日付行が下がるので、行番号は取り直す。
+62  inserted = SS_パレット行を確保(ws)
+64  If inserted > 0 Then dateRowNo = DateRow(ws)
+
 70  palRow = PaletteBodyRow(ws)
 80  If palRow = 0 Or palRow + MARKER_OFFSET < 1 Then
-90      MsgBox "パレットを置く行が足りません。" & vbCrLf & _
+90      MsgBox "パレットを置く行を作れませんでした。" & vbCrLf & _
                "日付行(" & dateRowNo & "行)の直上に " & PALETTE_ROWS & _
                " 行必要です。", vbExclamation
 100     Exit Sub
@@ -310,7 +320,8 @@ CleanUp:
     Application.EnableEvents = True
     On Error GoTo 0
     LogSuccess MODULE_NAME, "ShiftSetup_パレット生成", _
-               "Built palette row " & palRow & " with " & (UBound(vals) + 1) & " cells"
+               "Built palette row " & palRow & " with " & (UBound(vals) + 1) & _
+               " cells; inserted rows=" & inserted
     Exit Sub
 
 ErrHandler:
@@ -900,6 +911,87 @@ ErrHandler:
     SS_Q = nm
 End Function
 
+'--- パレットを置く3行が使えるか(空 または 既にパレットがある) ---
+'    「既にある」を見分けないと、実行するたびに行が増えていく。
+'    本体行の先頭セルが OFF なら、それは前回作ったパレットである。
+Private Function SS_パレット行は空か(ByVal ws As Worksheet, ByVal dRow As Long) As Boolean
+    Dim body As Long, r As Long, lastCol As Long, base As Variant
+    On Error GoTo ErrHandler
+
+10  body = dRow - PALETTE_GAP
+20  If body + MARKER_OFFSET < 1 Then Exit Function
+
+    '--- 既にパレットがある ---
+30  base = SS_PalValsBase()
+40  If Trim$(CStr(ws.Cells(body, ws.Range(COL_FIRST & "1").Column).Value)) _
+       = CStr(base(LBound(base))) Then
+50      SS_パレット行は空か = True
+60      Exit Function
+70  End If
+
+    '--- 3行が A列から右端まで空か ---
+80  lastCol = ws.Range(COL_LAST & "1").Column
+90  For r = body + MARKER_OFFSET To body + LABEL_OFFSET
+100     If Application.CountA(ws.Range(ws.Cells(r, 1), ws.Cells(r, lastCol))) > 0 Then Exit Function
+110 Next r
+120 SS_パレット行は空か = True
+    Exit Function
+ErrHandler:
+    LogError MODULE_NAME, "SS_パレット行は空か", Err.Number, Err.Description, Erl, _
+             "dateRow=" & dRow & "; body=" & body & "; r=" & r
+    SS_パレット行は空か = False
+End Function
+
+'--- パレット用の行を確保する。戻り値 = 挿入した行数(0 = 挿入不要) ---
+'    日付行の上には ★ / 本体 / ラベル / 年月 の4行が要る。
+'    白紙のブックから作るときはこの4行が無い。行はあっても、そこに
+'    別のタイトル等が書いてあれば、書き込むと消してしまう。
+'    どちらの場合も行を挿入して場所を作る。
+'    既にパレットがある場合は挿入しない(実行のたびに増えるため)。
+Private Function SS_パレット行を確保(ByVal ws As Worksheet) As Long
+    Dim dRow As Long, have As Long, need As Long, n As Long
+    On Error GoTo ErrHandler
+
+10  dRow = DateRow(ws)
+20  If dRow = 0 Then Exit Function
+
+    '--- 物理的に行が足りない: 先頭に足りない分だけ足す ---
+30  need = PALETTE_GAP + 1
+40  have = dRow - 1
+50  If have < need Then
+60      n = need - have
+70  ElseIf Not SS_パレット行は空か(ws, dRow) Then
+        '--- 行はあるが空でない: 年月行の位置に3行割り込ませる ---
+        '    こうすると日付行が3行下がり、空いた3行がちょうど
+        '    ★ / 本体 / ラベル の位置に来る。
+80      n = PALETTE_ROWS
+90  Else
+100     Exit Function
+110 End If
+
+120 Application.EnableEvents = False
+130 If have < need Then
+140     ws.Rows(1).Resize(n).Insert Shift:=xlDown
+150 Else
+160     ws.Rows(dRow - 1).Resize(n).Insert Shift:=xlDown
+170 End If
+180 SS_パレット行を確保 = n
+
+CleanUp:
+    On Error Resume Next
+    Application.EnableEvents = True
+    On Error GoTo 0
+    LogSuccess MODULE_NAME, "SS_パレット行を確保", _
+               "Inserted " & n & " rows above date row " & dRow
+    Exit Function
+
+ErrHandler:
+    LogError MODULE_NAME, "SS_パレット行を確保", Err.Number, Err.Description, Erl, _
+             "dateRow=" & dRow & "; have=" & have & "; need=" & need & "; n=" & n
+    SS_パレット行を確保 = 0
+    Resume CleanUp
+End Function
+
 '--- 廃止した名前をブックから消す(無ければ何もしない) ---
 Private Sub SS_DeleteObsoleteNames()
     Dim parts() As String, i As Long, nm As String, removed As String
@@ -982,6 +1074,10 @@ Public Sub ShiftSetup_初期設定実行()
 100 Application.Calculation = xlCalculationManual
 
 110 ShiftSetup_パレット生成
+    '--- パレット生成で行を挿入した場合に備え、基準を取り直す ---
+115 dateRowNo = DateRow(ws)
+116 topR = ShiftTopRow(ws)
+117 botR = ShiftBottomRow(ws)
 120 ShiftSetup_ヘッダ数式
 130 ShiftSetup_集計行数式
 140 ShiftSetup_集計列数式
