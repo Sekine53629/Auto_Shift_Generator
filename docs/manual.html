@@ -54,14 +54,14 @@
 <p>VBE に取り込む標準モジュールは次の9本です。<strong>すべて入れてください</strong>（依存関係があります）。</p>
 <table>
 <tr><th style="width:170px">モジュール</th><th style="width:70px">版</th><th>役割</th></tr>
-<tr><td><code>ShiftCommon</code></td><td>v2.7</td><td><strong>共通土台。</strong>シート名・A列ラベル・列・行オフセット・シフト記号・区分・範囲解決を一元管理。他のすべてがここを参照します</td></tr>
+<tr><td><code>ShiftCommon</code></td><td>v2.8</td><td><strong>共通土台。</strong>シート名・A列ラベル・列・行オフセット・シフト記号・区分・範囲解決を一元管理。他のすべてがここを参照します</td></tr>
 <tr><td><code>ErrorLogger</code></td><td>―</td><td>エラー／成功ログの出力（<code>C:\VBAErrorLogs\</code> にCSV）</td></tr>
 <tr><td><code>ShiftAuto</code><br>(AutoShiftGenerator)</td><td>v9.3.0</td><td>シフト自動作成の入口と前半工程（準備・メンバー読込・週リスト）</td></tr>
 <tr><td><code>ShiftAutoPlace</code></td><td>v9.3.0</td><td>公休の配置・均等化アルゴリズムと記号割当・書き込み・結果レポート</td></tr>
 <tr><td><code>ShiftAutoLog</code></td><td>v9.3.0</td><td>設定チェック・変更ログ・戻す・白紙化と共通ヘルパー</td></tr>
-<tr><td><code>ShiftClick</code></td><td>v9.3</td><td>クリック入力（パレットのモード切替・スタンプ・連続切替）</td></tr>
+<tr><td><code>ShiftClick</code></td><td>v9.4</td><td>クリック入力（パレットのモード切替・スタンプ・連続切替）</td></tr>
 <tr><td><code>ShiftSchema</code></td><td>v1.1</td><td>不足シート（自動作成設定／祝日マスタ／シフト変更ログ）の生成</td></tr>
-<tr><td><code>ShiftSetup</code></td><td>v2.6</td><td>シートの初期設定（パレット生成・集計行／集計列の数式・名前付き範囲）</td></tr>
+<tr><td><code>ShiftSetup</code></td><td>v2.7</td><td>シートの初期設定（パレット生成・集計行／集計列の数式・名前付き範囲）</td></tr>
 <tr><td><code>ShiftExport</code></td><td>v1.1</td><td>シフト表を印刷用に切り出して PDF / Excel へ出力</td></tr>
 <tr><td><code>ShiftSurvey</code></td><td>v2.2</td><td>シート構造の調査（読み取り専用）。行構成・数式・名前付き範囲をレポートに書き出します</td></tr>
 </table>
@@ -104,6 +104,20 @@
 <strong>医師名欄の決まり方</strong>　★マーカー行の直上5行を医師名欄とみなします。A列に <code>医師名</code> と入っている行があれば、そちらを上端として優先します（<strong>任意</strong>。入れなくても動きます）。行数を変えたい場合は <code>ShiftCommon</code> の <code>DOC_BLOCK_ROWS</code> を変更してください。
 </div>
 
+<h3>名前付き範囲は4つ</h3>
+<p>どれも <span class="macro">ShiftSetup_名前付き範囲更新</span> が作ります。名前が無くてもマクロは位置を計算して動きますが、あったほうが速く確実です。</p>
+<table>
+<tr><th style="width:170px">名前</th><th style="width:150px">中身</th><th>使われ方</th></tr>
+<tr><td><code>シフト入力範囲</code></td><td>スタッフの行 × 日付の列<br>（B14:AF27 など）</td><td><strong>スタンプの貼り付け先。</strong>自動作成が書き込む範囲でもあります</td></tr>
+<tr><td><code>シフトパレット</code></td><td>パレット本体の横1行<br>（B2:AD2 など）</td><td>ボタンが並ぶ行。押したボタンの位置を数えるのに使います</td></tr>
+<tr><td><code>医師名リスト範囲</code></td><td>医師名を書く欄</td><td><strong>マクロは読みません。</strong>名前ボックスから飛ぶための目印です。行を増減すると位置が古くなるので、貼り直してください（マクロ側は毎回計算するのでずれません）</td></tr>
+<tr><td><code>備考行範囲</code></td><td>備考の1行</td><td>備考スタンプの貼り付け先</td></tr>
+</table>
+
+<div class="warn">
+<strong>「シフトパレット範囲」という名前は廃止しました（v2.8）。</strong>名前は「パレット」なのに中身は入力欄で、パレット本体の <code>シフトパレット</code> と1文字違いで並ぶため取り違えの原因になっていました。<code>シフト入力範囲</code> に改名しています。<strong>モジュールを貼り替えたあと <span class="macro">ShiftSetup_名前付き範囲更新</span> を1回実行してください。</strong>新しい名前が作られ、古い名前は自動で削除されます。実行するまでは名前が無い状態として扱われ、マクロは位置を計算して動きます（動作に支障はありません）。
+</div>
+
 <div class="warn">
 <strong>行を増やして範囲がずれたら</strong> <span class="macro">ShiftSetup_名前付き範囲更新</span> を実行すれば、名前付き範囲が正しい位置に貼り直されます。ずれている場合は <span class="macro">シフト自動作成</span> <span class="macro">シフト設定チェック</span> <span class="macro">ShiftClick_セルフチェック</span> が警告を出します。
 </div>
@@ -133,7 +147,7 @@
 
 <p><strong>選択中のモードは★マーカー</strong>（パレット本体の1行上）と、Excel下部のステータスバーに表示されます。</p>
 <div class="info">
-<strong>医師名スタンプの押せる場所</strong>　パレットの<strong>医師名だけ</strong>（<code>IDX_DOC_FIRST</code>〜<code>IDX_DOC_LAST</code> の9個）は、<strong>医師名欄（日付行の2行下から5行）にだけ</strong>押せます。シフト入力欄には押せません。逆に医師名欄には <span class="sym">○</span> <span class="sym">●</span> <span class="sym">▲</span> や公休は押せず、<strong>消去</strong>と<strong>色消</strong>だけ受け付けます。医師名欄に出勤記号が混ざると <code>医師数(診)</code> のカウントがずれるためです。<br><br><strong>医師名より後ろにある <code>銀行</code> は医師名ではありません。</strong>これは<strong>備考欄</strong>で使うスタンプです。<br><br>スタンプは<strong>種類ごとに押せる場所が決まっています</strong>。別の場所に混ざると集計がずれるため、双方向で弾いています。<table style="margin-top:10px"><tr><th style="width:150px">場所</th><th>押せるスタンプ</th></tr><tr><td>シフト入力欄<br>（スタッフの行）</td><td>シフト記号（<span class="sym">○</span> <span class="sym">●</span> <span class="sym">▲</span> 公休 希休 夏休 有休 有休※）</td></tr><tr><td>備考行<br>（<code>医師数(診)</code> の2行上）</td><td><strong>備考スタンプのみ</strong>（<code>銀行</code> など、パレットで医師名より後ろにあるもの）</td></tr><tr><td>医師名欄<br>（日付行の2行下から5行）</td><td><strong>医師名スタンプのみ</strong></td></tr></table><code>消去</code> と <code>色消</code> はどこでも使えます（書き間違いを直せなくなるため）。<code>切替</code>（順送り）はシフト入力欄でのみ働き、シフト記号だけを巡回します。実際の行番号は <span class="macro">ShiftClick_セルフチェック</span> で確認できます。
+<strong>医師名スタンプの押せる場所</strong>　パレットの<strong>医師名だけ</strong>（3行目のラベルが <code>医師</code> で始まるもの。既定で10個）は、<strong>医師名欄（日付行の2行下から5行）にだけ</strong>押せます。シフト入力欄には押せません。逆に医師名欄には <span class="sym">○</span> <span class="sym">●</span> <span class="sym">▲</span> や公休は押せず、<strong>消去</strong>と<strong>色消</strong>だけ受け付けます。医師名欄に出勤記号が混ざると <code>医師数(診)</code> のカウントがずれるためです。<br><br><strong>医師名より後ろにある <code>銀行</code> は医師名ではありません。</strong>これは<strong>備考欄</strong>で使うスタンプです。<br><br>スタンプは<strong>種類ごとに押せる場所が決まっています</strong>。別の場所に混ざると集計がずれるため、双方向で弾いています。<table style="margin-top:10px"><tr><th style="width:150px">場所</th><th>押せるスタンプ</th></tr><tr><td>シフト入力欄<br>（スタッフの行）</td><td>シフト記号（<span class="sym">○</span> <span class="sym">●</span> <span class="sym">▲</span> 公休 希休 夏休 有休 有休※）</td></tr><tr><td>備考行<br>（<code>医師数(診)</code> の2行上）</td><td><strong>備考スタンプのみ</strong>（<code>銀行</code> など、パレットで医師名より後ろにあるもの）</td></tr><tr><td>医師名欄<br>（日付行の2行下から5行）</td><td><strong>医師名スタンプのみ</strong></td></tr></table><code>消去</code> と <code>色消</code> はどこでも使えます（書き間違いを直せなくなるため）。<code>切替</code>（順送り）はシフト入力欄でのみ働き、シフト記号だけを巡回します。実際の行番号は <span class="macro">ShiftClick_セルフチェック</span> で確認できます。
 </div>
 
 <h3>パレットの操作マクロ</h3>
@@ -147,7 +161,7 @@
 </table>
 
 <div class="warn">
-<strong>記号を追加したら</strong> パレットのセルに文字色・背景色を付けておくと、スタンプ時にその書式もコピーされます。色分けしたい記号は先に着色してください。
+<strong>記号を追加したら</strong> パレットのセルに文字色や背景色を付けておいても、<strong>その色はシフト表には移りません</strong>（v9.4 から）。パレットの色は「どのボタンか」を見分けるための飾りで、シフト表側の見た目ではないためです。移るのは<strong>値と太字だけ</strong>です。シフト表のセルを塗りたいときは<strong>背景緑／橙／灰</strong>のボタンを使ってください。
 </div>
 
 <h2>2-2. シートの初期設定（ShiftSetup）</h2>
@@ -159,7 +173,7 @@
 <tr><td><span class="macro">ShiftSetup_ヘッダ数式</span></td><td>年月セルと祝日サマリーの数式をセット</td></tr>
 <tr><td><span class="macro">ShiftSetup_集計行数式</span></td><td><code>医師数(診)</code> / <code>薬剤師出勤数</code> / <code>過不足</code> の数式をセット</td></tr>
 <tr><td><span class="macro">ShiftSetup_集計列数式</span></td><td>AH〜AL列の個人別集計をセット</td></tr>
-<tr><td><span class="macro">ShiftSetup_名前付き範囲更新</span></td><td>「シフトパレット範囲」「シフトパレット」を貼り直す</td></tr>
+<tr><td><span class="macro">ShiftSetup_名前付き範囲更新</span></td><td>「シフト入力範囲」「シフトパレット」「医師名リスト範囲」「備考行範囲」を貼り直し、廃止した旧名を消す</td></tr>
 </table>
 
 <h3>生成される集計行の数式</h3>
@@ -171,7 +185,7 @@
 </table>
 
 <div class="warn">
-<strong>医師名スタンプの初期値はダミーです。</strong> パレットの医師名（<code>医師1</code>〜<code>医師9</code>）は、<code>ShiftSetup.bas</code> の <code>SS_PalVals</code> を編集して実際の医師名に置き換えてください。個人情報のため、書き換えた内容はGitにコミットしないでください。
+<strong>医師名スタンプの初期値はダミーです。</strong> パレットの医師名（<code>医師1</code>〜<code>医師10</code>）は、<code>ShiftSetup.bas</code> の <code>SS_PalVals</code> を編集して実際の医師名に置き換えてください。個人情報のため、書き換えた内容はGitにコミットしないでください。
 </div>
 
 <h3>シフト表の出力（ShiftExport）</h3>
@@ -256,7 +270,7 @@ STEP 7   手修正で仕上げ
 <p>設定後、<span class="macro">シフト設定チェック</span> を実行して警告がゼロか確認してください。</p>
 <table>
 <tr><th style="width:170px">警告</th><th>意味と対処</th></tr>
-<tr><td>入力範囲が下すぎる</td><td>範囲の下端が <code>医師数(診)</code> の2行上を超えている。名前付き範囲「シフトパレット範囲」の終端を直す</td></tr>
+<tr><td>入力範囲が下すぎる</td><td>範囲の下端が <code>医師数(診)</code> の2行上を超えている。名前付き範囲「シフト入力範囲」の終端を直す</td></tr>
 <tr><td>氏名の重複</td><td>同名が2行ある。先に見つかった設定だけが適用されるため、区別できる氏名に変更</td></tr>
 <tr><td>区分が対象外</td><td>「薬剤師」「事務員」以外。出勤数に計上されないので修正</td></tr>
 <tr><td>マスタ未登録</td><td>シフト表にあるがマスタに無い。既定値（薬剤師・通常・遅番可）で処理されます</td></tr>

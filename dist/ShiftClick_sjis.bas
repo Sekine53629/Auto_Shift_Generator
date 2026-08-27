@@ -1,7 +1,7 @@
 Attribute VB_Name = "ShiftClick"
 Option Explicit
 '==================================================================
-'  シフト表 クリック入力マクロ ＜標準モジュール ShiftClick v9.3＞
+'  シフト表 クリック入力マクロ ＜標準モジュール ShiftClick v9.4＞
 '  2026-08-27
 '
 '  シート上の位置は ShiftCommon が一元管理する。
@@ -20,6 +20,9 @@ Option Explicit
 '    IDX_FILL_FIRST..IDX_FILL_LAST
 '                   背景緑/橙/灰 … 値を書かず背景色だけ塗る
 '    IDX_ERASE      消去   … 空白スタンプ。記号はこの次から
+'
+'  v9.4 変更:
+'   ・スタンプが背景色と文字色を持ち込まないようにした(APPLY_FILL 廃止)
 '
 '  v9.2 変更:
 '   ・ShiftAutoBridge を廃止し、AutoShiftPreflight / ShiftAuto_事前診断 を
@@ -41,8 +44,6 @@ Public Const CYCLE_TRIGGER As String = "double"
 Public Const STAMP_TRIGGER As String = "double"
 
 
-' True: スタンプ時にパレットの背景色も反映する
-Public Const APPLY_FILL         As Boolean = True
 ' True: 連続切替のときに背景色をクリアする(土日の色を残すなら False)
 Public Const CYCLE_RESETS_FILL  As Boolean = False
 ' 入力後にカーソルを動かす: "" / "down" / "right"
@@ -485,7 +486,12 @@ ErrHandler:
              "cell=" & c.Address(False, False) & "; reverse=" & Reverse & "; idx=" & idx
 End Sub
 
-'--- パレットのセルの値と書式をコピーする ---
+'--- パレットのセルの値をコピーする(色は持ち込まない) ---
+'    パレット上の色分け(医師名スタンプの背景色・文字色など)は
+'    「パレットのどのボタンか」を見分けるための飾りであって、
+'    シフト表側の見た目ではない。貼り付け先の色はそのまま残す。
+'    背景色を塗りたいときは背景色ボタン(ApplyFillOnly)を使う。
+'    太字だけは記号の強調に使うので引き継ぐ。
 Private Sub ApplyStamp(ByVal c As Range, ByVal src As Range)
     On Error GoTo ErrHandler
 
@@ -499,13 +505,7 @@ Private Sub ApplyStamp(ByVal c As Range, ByVal src As Range)
 70  Else
 80      c.Value = src.Value
 90  End If
-100 c.Font.Color = src.Font.Color
-110 c.Font.Bold = src.Font.Bold
-120 If APPLY_FILL Then
-130     If src.Interior.Pattern <> xlNone Then
-140         c.Interior.Color = src.Interior.Color
-150     End If
-160 End If
+100 c.Font.Bold = src.Font.Bold
     Exit Sub
 ErrHandler:
     LogError MODULE_NAME, "ApplyStamp", Err.Number, Err.Description, Erl, _

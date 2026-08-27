@@ -1,7 +1,7 @@
 Attribute VB_Name = "ShiftSetup"
 Option Explicit
 '==================================================================
-'  シフト表 初期設定マクロ ＜標準モジュール ShiftSetup v2.6＞
+'  シフト表 初期設定マクロ ＜標準モジュール ShiftSetup v2.7＞
 '  2026-08-27
 '  ShiftCommon / ShiftSchema / ShiftClick と併用。
 '  シート上の位置はすべて ShiftCommon が解決する。
@@ -15,6 +15,9 @@ Option Explicit
 '      3) 集計行(医師数(診)/薬剤師出勤数/過不足)の数式
 '      4) 集計列(AH:AL)の見出しと数式
 '      5) 名前付き範囲の再定義(動的数式)
+'
+'  v2.7 変更:
+'   ・名前付き範囲の改名にあわせ、廃止した旧名を消す工程を追加。
 '
 '  v2.6 変更:
 '   ・パレットの医師名ラベルをリテラル "医師" から
@@ -795,6 +798,11 @@ Public Sub ShiftSetup_名前付き範囲更新()
     '--- パレット本体(動的: A列の見出しを追い、幅はラベル行から数える) ---
 110 SS_ReplaceName NM_PALETTE, SS_PaletteFormula(ws)
 
+    '--- 廃止した名前の掃除 ---
+    '    改名しただけでは旧名がブックに残り、中身と食い違う名前が
+    '    2つ並んでどちらが生きているのか分からなくなる。
+120 SS_DeleteObsoleteNames
+
     LogSuccess MODULE_NAME, "ShiftSetup_名前付き範囲更新", _
                "shift=" & COL_FIRST & topR & ":" & COL_LAST & botR & "(dynamic)" & _
                ", paletteRow=" & palRow & "(dynamic)"
@@ -892,6 +900,35 @@ Private Function SS_Q(ByVal nm As String) As String
 ErrHandler:
     SS_Q = nm
 End Function
+
+'--- 廃止した名前をブックから消す(無ければ何もしない) ---
+Private Sub SS_DeleteObsoleteNames()
+    Dim parts() As String, i As Long, nm As String, removed As String
+    On Error GoTo ErrHandler
+
+10  If Len(Trim$(NM_OBSOLETE)) = 0 Then Exit Sub
+20  parts = Split(NM_OBSOLETE, ",")
+30  For i = LBound(parts) To UBound(parts)
+40      nm = Trim$(parts(i))
+50      If Len(nm) > 0 Then
+            '--- 名前が無い場合の削除失敗は正常系。
+            '    消せたかどうかで存在を判定する(#REF! の名前も拾える) ---
+60          On Error Resume Next
+70          Err.Clear
+80          ThisWorkbook.Names(nm).Delete
+90          If Err.Number = 0 Then removed = removed & " " & nm
+95          Err.Clear
+100         On Error GoTo ErrHandler
+105     End If
+110 Next i
+
+    LogSuccess MODULE_NAME, "SS_DeleteObsoleteNames", _
+               "removed=" & IIf(Len(removed) = 0, "(none)", Trim$(removed))
+    Exit Sub
+ErrHandler:
+    LogError MODULE_NAME, "SS_DeleteObsoleteNames", Err.Number, Err.Description, Erl, _
+             "name=" & nm
+End Sub
 
 '--- 名前付き範囲を貼り替える ---
 Private Sub SS_ReplaceName(ByVal nm As String, ByVal refersTo As String)
