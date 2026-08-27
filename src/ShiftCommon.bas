@@ -1,7 +1,13 @@
 Option Explicit
 '==================================================================
-'  シフト表 共通モジュール ＜標準モジュール ShiftCommon v2.8＞
+'  シフト表 共通モジュール ＜標準モジュール ShiftCommon v3.0＞
 '  2026-08-27
+'
+'  v3.0: 上限判定の失敗時に使う CNT_LARGE を追加。
+'
+'  v2.9: 事務員の早番人数の既定値 CLERK_EARLY_DEFAULT と、
+'        混雑日のしきい値 DOC_BUSY_N を追加。DOC_BUSY_N は
+'        集計列の「5診出勤」と自動作成の均等化で共用する。
 '
 '  v2.8: 貼り付け先の名前付き範囲を「シフトパレット範囲」から
 '        「シフト入力範囲」に改名。中身は入力欄でパレットではない。
@@ -203,6 +209,17 @@ Public Const SYM_LATE      As String = "▲"
 Public Const SYM_OFF       As String = "公休"
 
 '--- 区分の正規値(これ以外は設定チェックで警告) ---
+' 事務員の早番(○)人数/日の既定値(設定シートに行が無いときに使う)
+Public Const CLERK_EARLY_DEFAULT As Long = 1
+
+' 「混雑日」とみなす医師数。集計列の「5診出勤」と自動作成の均等化で
+' 同じ値を使う(片方だけ変えると表と中身がずれるため共有定数とする)
+Public Const DOC_BUSY_N As Long = 5
+
+' 上限判定が例外で答えを出せないときに返す値。
+' 「上限を超えている」と見なして動かさない側に倒すために使う
+Public Const CNT_LARGE As Long = 32767
+
 Public Const KIND_PH As String = "薬剤師"
 Public Const KIND_CL As String = "事務員"
 

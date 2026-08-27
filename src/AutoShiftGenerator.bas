@@ -1,7 +1,18 @@
 Option Explicit
 '==================================================================
-'  ShiftAuto v9.3.0
+'  ShiftAuto v9.7.0
 '  自動作成の入口と前半工程(準備〜週リスト)。
+'  v9.7.0: 読まれない設定を事前確認で知らせるようにした。月間休日数は
+'          勤務ルールが通常の人しか見ないため、固定曜日・週N日の人に
+'          入れても黙って捨てられていた。入力できるのに効かない欄は
+'          気づけないので、実行前に一覧で出す。
+'  v9.6.0: 不足を埋める交換のときだけ連勤上限に足す日数 mRunBonus を追加。
+'          通常の配置は従来どおりの上限を守り、必要数に届かない日を
+'          埋めるときだけ上限を緩める。既定は0で挙動は変わらない。
+'  v9.5.0: 混雑日(医師 DOC_BUSY_N 名)の遅番最低人数 mLateBusy を追加。
+'          0 のときは通常の遅番最低人数と同じ扱いで、既定は 0。
+'  v9.4.0: 日別の過不足を均す CoverBalance を FiveBalance の前に追加。
+'          事務員の早番人数を設定から読む(mClerkEarlyN)。
 '  v9.3.0: 書き込みの後に AS_休業行の塗り を呼ぶ工程を追加。
 '  v9.2.0: 記号・区分の定数を ShiftCommon へ移管。
 '          モジュール外から呼ばれない AS_* を Private に変更。
@@ -48,6 +59,9 @@ Public mDayDt() As Date
 Public mEarlyN As Long, mLateMin As Long
 Public mWeekBase As Long, mReqPlus As Long
 Public mGSym As String                ' 事務員の2人目の記号
+Public mClerkEarlyN As Long           ' 事務員の早番(○)人数/日
+Public mLateBusy As Long              ' 混雑日の遅番(▲)最低人数/日(0=通常と同じ)
+Public mRunBonus As Long              ' 不足を埋めるときだけ連勤上限に足す日数
 '  メンバー情報
 Public mName() As String
 Public mWD() As Boolean               ' (i, 1-7) 固定曜日
@@ -57,6 +71,7 @@ Public mActiveN As Long, mSkipN As Long
 '  不整合の検出結果(メッセージを連結)
 Public mDupName As String, mMissing As String
 Public mBadKind As String, mOrphan As String
+Public mIgnored As String             ' 設定したのに読まれない項目
 '  週リスト
 Public mWkList() As Long, mNW As Long
 '  配置・書き込みの集計
@@ -128,7 +143,8 @@ Public Sub シフト自動作成()
 120 If Not AS_残ノルマ配置() Then Exit Sub
 130 If Not AS_連勤緩和() Then Exit Sub
 
-    '--- 5) 医師5名日の出勤を均等化 ---
+    '--- 5) 日別の過不足を均し、医師5名日の出勤を均等化 ---
+135 CoverBalance
 140 FiveBalance
 
     '--- 6) 記号(○●▲)の割当と均等化 ---
@@ -163,6 +179,7 @@ Private Sub AS_状態リセット()
 30  mActiveN = 0: mSkipN = 0: mNW = 0
 40  mUnmet = "": mDupName = "": mMissing = ""
 50  mBadKind = "": mOrphan = ""
+60  mIgnored = ""
     Exit Sub
 ErrHandler:
     LogError MODULE_NAME, "AS_状態リセット", Err.Number, Err.Description, Erl, ""
@@ -210,7 +227,13 @@ Private Function AS_準備() As Boolean
 210  mReqPlus = CLng(CfgNum(mCfg, "必要出勤", 1))
 220  mPaidSyms = CfgTxt(mCfg, "ノルマ外", "有休")
 230  mGSym = CfgTxt(mCfg, "2人目", SYM_MID)
+235  mClerkEarlyN = CLng(CfgNum(mCfg, "事務員の早番", CLERK_EARLY_DEFAULT))
+236  mLateBusy = CLng(CfgNum(mCfg, "混雑日", 0))
+237  mRunBonus = CLng(CfgNum(mCfg, "上乗せ", 0))
 240  If mEarlyN < 0 Then mEarlyN = 0
+245  If mClerkEarlyN < 0 Then mClerkEarlyN = 0
+246  If mLateBusy < 0 Then mLateBusy = 0
+247  If mRunBonus < 0 Then mRunBonus = 0
 250  If mLateMin < 0 Then mLateMin = 0
 260  If mMaxRun < 1 Then mMaxRun = 1
 270  If mMaxOffRun < 1 Then mMaxOffRun = 1
@@ -360,6 +383,15 @@ Private Function AS_メンバー読込() As Boolean
                 '--- 区分が正規値以外だと人数計算に計上されず静かに壊れる ---
 420              mBadKind = mBadKind & "・" & mName(i) & " : 区分「" & mKind(i) & "」" & vbCrLf
 430          End If
+             '--- 月間休日数は通常ルールでしか読まない ---
+             '    固定曜日は曜日から、週N日は週の勤務日数から休みが
+             '    決まるため、入れても捨てられる
+435          If mQuota(i) >= 0 And mRule(i) <> "通常" Then
+437              mIgnored = mIgnored & "・" & mName(i) & _
+                            " : 月間休日数" & mQuota(i) & _
+                            "日 (勤務ルール「" & mRule(i) & _
+                            "」では読まれません)" & vbCrLf
+439          End If
 440      End If
 450  Next i
 
@@ -424,7 +456,8 @@ Private Function AS_事前確認() As Boolean
     On Error GoTo ErrHandler
 
     '=== 整合性チェックの事前確認 ===
-10   If Len(mMissing) > 0 Or Len(mOrphan) > 0 Or Len(mDupName) > 0 Or Len(mBadKind) > 0 Then
+10   If Len(mMissing) > 0 Or Len(mOrphan) > 0 Or Len(mDupName) > 0 Or _
+        Len(mBadKind) > 0 Or Len(mIgnored) > 0 Then
 20       msg = "設定の整合性に注意点があります。" & vbCrLf & vbCrLf
 30       If Len(mDupName) > 0 Then
 40           msg = msg & "■ 氏名が重複(先に見つかった設定が適用されます)" & vbCrLf & mDupName & vbCrLf
@@ -439,6 +472,9 @@ Private Function AS_事前確認() As Boolean
 120      If Len(mOrphan) > 0 Then
 130          msg = msg & "■ マスタにあるがシフト表に無い(行削除・氏名変更?)" & vbCrLf & mOrphan & vbCrLf
 140      End If
+145      If Len(mIgnored) > 0 Then
+147          msg = msg & "■ 設定しても読まれない項目(この値は使われません)" & vbCrLf & mIgnored & vbCrLf
+149      End If
 150      msg = msg & "このまま実行しますか?"
 160      If MsgBox(msg, vbYesNo + vbExclamation, "設定チェック") <> vbYes Then
 170          AS_事前確認 = False      ' 利用者が中止 → 呼び出し側で処理を止める

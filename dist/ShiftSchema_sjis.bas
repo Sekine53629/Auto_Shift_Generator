@@ -1,8 +1,15 @@
 Attribute VB_Name = "ShiftSchema"
 Option Explicit
 '==================================================================
-'  シフト表 シート生成モジュール ＜標準モジュール ShiftSchema v1.2＞
+'  シフト表 シート生成モジュール ＜標準モジュール ShiftSchema v1.5＞
 '  2026-08-27
+'
+'  v1.5: 全体設定に「不足を埋めるときの連勤上限の上乗せ」を追加。
+'
+'  v1.4: 全体設定に「混雑日の遅番(▲) 最低人数/日」を追加。
+'
+'  v1.3: 全体設定に「事務員の早番(○) 人数/日」を追加。既存シートには
+'        空欄の行だけが足されるため、再実行しても設定値は消えない。
 '
 '  目的:
 '    自動作成設定 / 祝日マスタ / シフト変更ログ が存在しない場合に
@@ -81,7 +88,10 @@ Private Function SC_SetKeys() As Variant
                        "必要出勤数(医師数+n)の n", _
                        "ノルマ外の休み記号(カンマ区切り)", _
                        "週の定義(固定)", _
-                       "事務員の2人目の記号(○は1日1人)")
+                       "事務員の2人目以降の記号", _
+                       "事務員の早番(○) 人数/日", _
+                       "混雑日_医師" & DOC_BUSY_N & "名_の遅番(▲) 最低人数/日 0=通常と同じ", _
+                       "不足を埋めるときの連勤上限の上乗せ(日) 0=上乗せなし")
     Exit Function
 ErrHandler:
     LogError MODULE_NAME, "SC_SetKeys", Err.Number, Err.Description, Erl, ""
@@ -91,7 +101,7 @@ Private Function SC_SetVals() As Variant
     On Error GoTo ErrHandler
     '  1件目は見出しなので値なし("値" を入れる)
     SC_SetVals = Array("値", 1, 3, 3, 3, 2, 1, "有休", _
-                       "日曜始まり・土曜終わり", "●")
+                       "日曜始まり・土曜終わり", "●", CLERK_EARLY_DEFAULT, 0, 0)
     Exit Function
 ErrHandler:
     LogError MODULE_NAME, "SC_SetVals", Err.Number, Err.Description, Erl, ""

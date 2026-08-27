@@ -1,9 +1,11 @@
 Option Explicit
 '==================================================================
-'  シフト表 初期設定マクロ ＜標準モジュール ShiftSetup v2.8＞
+'  シフト表 初期設定マクロ ＜標準モジュール ShiftSetup v2.9＞
 '  2026-08-27
 '  ShiftCommon / ShiftSchema / ShiftClick と併用。
 '  シート上の位置はすべて ShiftCommon が解決する。
+'
+'  v2.9: 私有定数 DOC_BUSY_COUNT を廃止し ShiftCommon.DOC_BUSY_N を使う。
 '
 '  実行するのは基本これ1本:
 '      ShiftSetup_初期設定実行
@@ -70,7 +72,6 @@ Private Const COL_MONTH     As String = "AG"  ' 年月シリアルの置き場
 Private Const COL_HOL_SUMM  As String = "I"   ' 祝日サマリーの置き場
 
 ' 医師数の「忙しい日」判定に使う人数(集計列 n診出勤)
-Private Const DOC_BUSY_COUNT As Long = 5
 
 ' 集計行の見出し(空欄のときだけ補う)
 Private Const HEAD_DOC   As String = "医師数(診)"
@@ -246,7 +247,7 @@ End Function
 Private Function SS_AggHeads() As Variant
     On Error GoTo ErrHandler
     SS_AggHeads = Array("休", "○早番", "▲遅番", "●遅半", _
-                        DOC_BUSY_COUNT & "診出勤")
+                        DOC_BUSY_N & "診出勤")
     Exit Function
 ErrHandler:
     LogError MODULE_NAME, "SS_AggHeads", Err.Number, Err.Description, Erl, ""
@@ -753,7 +754,7 @@ ErrHandler:
     SS_CountFormula = ""
 End Function
 
-'--- 医師が DOC_BUSY_COUNT 名の日の出勤数を数える数式 ---
+'--- 医師が DOC_BUSY_N 名の日の出勤数を数える数式 ---
 Private Function SS_BusyDayFormula(ByVal r As Long, ByVal docRow As Long) As String
     Dim rngRef As String, docRef As String, syms As Variant
     Dim s As String, i As Long
@@ -765,7 +766,7 @@ Private Function SS_BusyDayFormula(ByVal r As Long, ByVal docRow As Long) As Str
 50      If Len(s) > 0 Then s = s & "+"
 60      s = s & "(" & rngRef & "=""" & syms(i) & """)"
 70  Next i
-80  SS_BusyDayFormula = "=SUMPRODUCT((" & docRef & "=" & DOC_BUSY_COUNT & ")*(" & s & "))"
+80  SS_BusyDayFormula = "=SUMPRODUCT((" & docRef & "=" & DOC_BUSY_N & ")*(" & s & "))"
     Exit Function
 ErrHandler:
     LogError MODULE_NAME, "SS_BusyDayFormula", Err.Number, Err.Description, Erl, _

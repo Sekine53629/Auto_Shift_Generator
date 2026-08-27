@@ -1,7 +1,10 @@
 Option Explicit
 '==================================================================
-'  ShiftAutoLog v9.3.0
+'  ShiftAutoLog v9.5.0
 '  設定チェック・変更ログ・白紙化と共通の小物ヘルパ。
+'  v9.5.0: WorkRunIf と対になる OffRunIf を追加(その日を公休にした
+'          ときの連休の長さ)。連休上限の判定を1か所にまとめるため。
+'  v9.4.0: FiveCnt の医師数のしきい値を ShiftCommon.DOC_BUSY_N に寄せた。
 '  v9.3.0: 期替わり判定(シフト期替わり確認)をシートモジュールから移管。
 '          スピンボタンから直接呼べるようにするため。
 '  ※ ShiftAuto / ShiftAutoPlace / ShiftAutoLog の3本で1組。
@@ -598,6 +601,18 @@ ErrHandler:
 End Function
 
 
+'--- その日を公休にしたときの連休の長さ(WorkRunIf と対) ---
+Public Function OffRunIf(ByVal i As Long, ByVal j As Long) As Long
+    On Error GoTo ErrHandler
+    OffRunIf = 1 + OffRunBefore(i, j) + OffRunAfter(i, j)
+    Exit Function
+ErrHandler:
+    LogError MODULE_NAME, "OffRunIf", Err.Number, Err.Description, Erl, _
+             "i=" & i & "; j=" & j
+    OffRunIf = CNT_LARGE
+End Function
+
+
 Public Function OffRunBefore(ByVal i As Long, ByVal j As Long) As Long
     On Error GoTo ErrHandler
     Dim a As Long
@@ -638,7 +653,7 @@ Public Function FiveCnt(ByVal i As Long) As Long
     On Error GoTo ErrHandler
     Dim j As Long
     For j = 1 To mND
-        If mDayIn(j) And mDayDoc(j) = 5 Then
+        If mDayIn(j) And mDayDoc(j) = DOC_BUSY_N Then
             If mPlan(i, j) = ST_WORK Or mPlan(i, j) = ST_FWORK Then FiveCnt = FiveCnt + 1
         End If
     Next j

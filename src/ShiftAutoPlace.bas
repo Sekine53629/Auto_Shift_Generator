@@ -1,7 +1,33 @@
 Option Explicit
 '==================================================================
-'  ShiftAutoPlace v9.3.0
+'  ShiftAutoPlace v9.8.0
 '  公休の配置・均等化アルゴリズムと後半工程。
+'  v9.8.0: 不足を埋める交換のときだけ連勤上限に mRunBonus を足せる
+'          ようにした。診断ログが rawPairs=20 / pairs=0 を示し、日単位
+'          では成立する交換20組がすべて連勤・連休の上限で消えていた
+'          ため。どちらの上限で消えたかを blkRun / blkOff で出す。
+'  v9.7.0: AS_連勤緩和 が勤務ルールを見ずに全員へ RepairRuns を
+'          かけていたのを修正。固定曜日は対象外にし、週N日は同じ週の
+'          中だけで入れ替えるようにした。旧版は週をまたいで日を移す
+'          ため、週N日の週あたり勤務日数が崩れていた。
+'          CB_診断 に rawPairs(連勤・連休を見る前の組数)を追加。
+'  v9.6.0: CoverBalance の連勤・連休の判定を「交換した後の状態」で
+'          行うように修正。交換前の状態で見ていたため、抜く日が
+'          入れる日の隣にあるとき、まだ出勤のままの抜く日を連勤に
+'          数えてしまい、実際には収まる交換まで弾いていた。
+'          1手も動かなかったときの切り分け用に CB_診断 を追加し、
+'          CoverBalance の LogSuccess に評価値と手数を出す。
+'  v9.5.0: 遅番の最低人数を日ごとに決める AP_遅番目標 を追加。
+'          混雑日だけ厚くできる(設定が0なら従来どおり全日同じ)。
+'          CoverBalance の判定を「不足の二乗和(CB_評価)が下がる交換を
+'          選ぶ」方式に置き換え。しきい値 CB_MIN_GAP を廃止したため、
+'          過剰+1 の日が残らなくなる。
+'          記号の候補選択が同点のとき常に上の行を選び、1人に偏って
+'          いたのを、日ごとに走査開始位置をずらして解消。
+'  v9.4.0: CoverBalance(日別の過不足を均す工程)を追加。
+'          FiveBalance が5診日の出勤数を減らし続ける不具合を修正。
+'          事務員の記号割当を「置く記号で候補を並べる」ように修正し、
+'          早番人数を設定値(mClerkEarlyN)から読むようにした。
 '  v9.3.0: AS_休業行の塗り を追加(休業者の行を灰色にする)。
 '  v9.2.0: AS_記号割当(136行)と AS_レポート(106行)を工程ごとに分割。
 '          AS_レポート が常に False を返し、呼び出し側の最終 LogSuccess に
@@ -13,8 +39,13 @@ Private Const MODULE_NAME As String = "ShiftAutoPlace"
 
 ' 候補選択の初期値(これより小さいカウントを探す)
 Private Const CNT_INF As Long = 32767
-' 事務員の早番(○)は1日あたり何人までか
-Private Const CLERK_EARLY_MAX As Long = 1
+' スコア比較の初期値(これより大きいスコアを探す)
+Private Const SCORE_INF As Double = -1E+30
+' CoverBalance の打ち切り回数。1回の入替で不足の二乗和が必ず減るため
+' 通常はこの上限に達する前に収束する(無限ループの保険)
+Private Const CB_MAX_PASS As Long = 500
+' FiveBalance の打ち切り回数
+Private Const FB_MAX_PASS As Long = 100
 
 '--- v9.1.1 追加: 宣言漏れの補完 ---
 '  残りの公休ノルマ日数。AS_公休ノルマ で算出し
@@ -193,11 +224,15 @@ Public Function AS_連勤緩和() As Boolean
     On Error GoTo ErrHandler
 
     '=== 連勤上限超えの緩和(入替) ===
+    '    固定曜日は「その曜日に出る」ことが約束なので触らない。
+    '    連勤が上限を超えてもそれが正しい姿で、動かすと約束が崩れる。
 10   For guard = 1 To 3
 20       For i = 1 To mNP
-30           If Not mSkipRow(i) And Not mLeave(i) Then RepairRuns i
-40       Next i
-50   Next guard
+30           If Not mSkipRow(i) And Not mLeave(i) Then
+40               If mRule(i) <> "固定曜日" Then RepairRuns i
+50           End If
+60       Next i
+70   Next guard
 
     AS_連勤緩和 = True
     Exit Function
@@ -298,11 +333,17 @@ End Sub
 '------------------------------------------------------------------
 Private Function AP_最少候補(ByVal j As Long, ByVal kind As String, _
                              ByVal sym As String, ByVal lateOnly As Boolean) As Long
-    Dim i As Long, best As Long, bestCnt As Long, c As Long
+    Dim i As Long, k As Long, best As Long, bestCnt As Long, c As Long
     On Error GoTo ErrHandler
 
+    '--- 走査の開始位置を日ごとにずらす。
+    '    同点のとき常に上の行を選ぶと、事務員が2名以上いても
+    '    片方に記号が寄り続ける(月合計が並んだ日は必ず先頭が勝つため)。
+    '    乱数ではなく日付による巡回にしているのは、同じ入力なら
+    '    同じ結果になり、実行を比べられるようにするため。
 10  best = 0: bestCnt = CNT_INF
-20  For i = 1 To mNP
+20  For k = 0 To mNP - 1
+25      i = ((j + k - 1) Mod mNP) + 1
 30      If Not mSkipRow(i) Then
 40          If mKind(i) = kind And mPlan(i, j) = ST_WORK And Len(mSymb(i, j)) = 0 Then
 50              If (Not lateOnly) Or mCanLate(i) Then
@@ -311,7 +352,7 @@ Private Function AP_最少候補(ByVal j As Long, ByVal kind As String, _
 80              End If
 90          End If
 100     End If
-110 Next i
+110 Next k
 120 AP_最少候補 = best
     Exit Function
 ErrHandler:
@@ -337,6 +378,23 @@ ErrHandler:
 End Sub
 
 '------------------------------------------------------------------
+' AP_遅番目標
+'   その日の遅番(▲)の最低人数。混雑日(医師 DOC_BUSY_N 名)だけ
+'   別の人数にできる。設定が0のときは全日とも通常の最低人数。
+'------------------------------------------------------------------
+Private Function AP_遅番目標(ByVal j As Long) As Long
+    On Error GoTo ErrHandler
+
+10  AP_遅番目標 = mLateMin
+20  If mLateBusy > 0 And mDayDoc(j) >= DOC_BUSY_N Then AP_遅番目標 = mLateBusy
+    Exit Function
+ErrHandler:
+    LogError MODULE_NAME, "AP_遅番目標", Err.Number, Err.Description, Erl, _
+             "j=" & j & "; lateMin=" & mLateMin & "; lateBusy=" & mLateBusy
+    AP_遅番目標 = mLateMin
+End Function
+
+'------------------------------------------------------------------
 ' AP_薬剤師の記号
 '   ○(設定人数) → ▲(最低人数) → 残りを ● ▲ で均等、の順に決める。
 '------------------------------------------------------------------
@@ -357,8 +415,8 @@ Private Sub AP_薬剤師の記号(ByVal j As Long)
 70      needE = needE - 1
 80  Loop
 
-    '--- ▲: 設定の最低人数まで(遅番可の人のみ) ---
-90  needL = mLateMin - dayL
+    '--- ▲: 設定の最低人数まで(遅番可の人のみ・混雑日は別人数) ---
+90  needL = AP_遅番目標(j) - dayL
 100 Do While needL > 0
 110     bi = AP_最少候補(j, KIND_PH, SYM_LATE, True)
 120     If bi = 0 Then Exit Do
@@ -382,23 +440,25 @@ End Sub
 
 '------------------------------------------------------------------
 ' AP_事務員の記号
-'   ○(早番)は1日1人まで。2人目以降は設定の記号(L13)にする。
+'   ○(早番)は設定の人数まで。それ以降は設定の記号(事務員の2人目の記号)。
+'   ここでいう早番人数は事務員だけの枠で、薬剤師の早番(mEarlyN)とは別に
+'   数える。1日の○の合計は mEarlyN + mClerkEarlyN になる。
+'   v9.4.0: 置く記号を先に決め、その記号の月合計が最少の人を選ぶ。
+'   旧版は●を置くときも○の回数で候補を並べていた。
 '------------------------------------------------------------------
 Private Sub AP_事務員の記号(ByVal j As Long)
     Dim dayE As Long, dayM As Long, dayL As Long, bi As Long
+    Dim symS As String
     On Error GoTo ErrHandler
 
 10  AP_日別既存数 j, KIND_CL, dayE, dayM, dayL
 20  Do
-30      bi = AP_最少候補(j, KIND_CL, SYM_EARLY, False)
-40      If bi = 0 Then Exit Do
-50      If dayE < CLERK_EARLY_MAX Then
-60          AP_記号を置く bi, j, SYM_EARLY
-70          dayE = dayE + 1
-80      Else
-90          AP_記号を置く bi, j, mGSym
-100     End If
-110 Loop
+30      If dayE < mClerkEarlyN Then symS = SYM_EARLY Else symS = mGSym
+40      bi = AP_最少候補(j, KIND_CL, symS, False)
+50      If bi = 0 Then Exit Do
+60      AP_記号を置く bi, j, symS
+70      If symS = SYM_EARLY Then dayE = dayE + 1
+80  Loop
     Exit Sub
 ErrHandler:
     LogError MODULE_NAME, "AP_事務員の記号", Err.Number, Err.Description, Erl, _
@@ -622,16 +682,17 @@ Private Function AP_レポート警告() As String
 
 80  lateShort = AP_遅番不足日数(lateBad)
 90  If lateShort > 0 Then
-100     msg = msg & vbCrLf & "※遅番(" & SYM_LATE & ")が目標" & mLateMin & "名に届かない日: " & _
-              lateShort & "日" & _
-              IIf(lateBad > 0, "　■ うち" & mLateMin - 1 & "名未満: " & lateBad & "日", "") & vbCrLf
+100     msg = msg & vbCrLf & "※遅番(" & SYM_LATE & ")が目標" & mLateMin & "名" & _
+              IIf(mLateBusy > 0, "(" & DOC_BUSY_N & "診日は" & mLateBusy & "名)", "") & _
+              "に届かない日: " & lateShort & "日" & _
+              IIf(lateBad > 0, "　■ うち目標-1名未満: " & lateBad & "日", "") & vbCrLf
 110 End If
 
+115 msg = msg & AP_連勤上乗せの影響()
 120 shortN = AP_必要数不足日数(worst)
 130 If shortN > 0 Then
 140     msg = msg & vbCrLf & "※必要数(医師数+" & mReqPlus & ")に届かない日: " & shortN & _
-              "日(最大不足" & worst & "名)" & vbCrLf & _
-              "　→ 公休ノルマ優先のため。日別は過不足行で確認できます。" & vbCrLf
+              "日(最大不足" & worst & "名)" & vbCrLf & AP_人日収支()
 150 End If
 
 160 If Len(mMissing) > 0 Then msg = msg & vbCrLf & "設定未登録(既定値で処理):" & vbCrLf & mMissing
@@ -642,6 +703,60 @@ ErrHandler:
     LogError MODULE_NAME, "AP_レポート警告", Err.Number, Err.Description, Erl, _
              "nd=" & mND
     AP_レポート警告 = msg
+End Function
+
+'--- 連勤の上乗せを使った結果、通常上限を超えた人を出す ---
+'    上乗せは労務上の例外なので、誰が何日になったかを必ず見せる。
+Private Function AP_連勤上乗せの影響() As String
+    Dim i As Long, n As Long, worst As Long, r As Long, names As String
+    On Error GoTo ErrHandler
+
+10  If mRunBonus <= 0 Then Exit Function
+20  For i = 1 To mNP
+30      If Not mSkipRow(i) And Not mLeave(i) Then
+40          r = MaxRun(i)
+50          If r > mMaxRun Then
+60              n = n + 1
+70              If r > worst Then worst = r
+80              names = names & "・" & mName(i) & "(" & r & "日)" & vbCrLf
+90          End If
+100     End If
+110 Next i
+120 If n = 0 Then Exit Function
+130 AP_連勤上乗せの影響 = vbCrLf & "■ 連勤が通常の上限" & mMaxRun & "日を超えた人: " & _
+        n & "名(最大" & worst & "日)" & vbCrLf & names & _
+        "　→ 不足日を埋めるため上限に" & mRunBonus & "日上乗せしています。" & vbCrLf
+    Exit Function
+ErrHandler:
+    LogError MODULE_NAME, "AP_連勤上乗せの影響", Err.Number, Err.Description, Erl, _
+             "i=" & i & "; n=" & n
+    AP_連勤上乗せの影響 = ""
+End Function
+
+'--- 必要数不足が「人手不足」か「配分の偏り」かを1行で示す ---
+'    月の総必要人日と総出勤人日を比べる。総出勤が足りていれば配置を
+'    変える余地があり、足りていなければ人を増やす以外に解がない。
+Private Function AP_人日収支() As String
+    Dim j As Long, totReq As Long, totCov As Long, gap As Long
+    On Error GoTo ErrHandler
+
+10  For j = 1 To mND
+20      If mDayIn(j) Then
+30          totReq = totReq + mDayReq(j)
+40          totCov = totCov + mCov(j)
+50      End If
+60  Next j
+70  gap = totReq - totCov
+80  AP_人日収支 = "　月の必要人日: " & totReq & "　出勤人日: " & totCov & vbCrLf & _
+        IIf(gap > 0, _
+            "　→ 人日そのものが" & gap & "日分足りません。" & _
+            "公休ノルマを減らすか人を増やさない限り解消しません。", _
+            "　→ 人日は足りています。日別の配分の問題です。") & vbCrLf
+    Exit Function
+ErrHandler:
+    LogError MODULE_NAME, "AP_人日収支", Err.Number, Err.Description, Erl, _
+             "j=" & j & "; totalReq=" & totReq & "; totalCov=" & totCov
+    AP_人日収支 = ""
 End Function
 
 '--- 事務員が1人もいない日の数 ---
@@ -686,15 +801,15 @@ End Function
 
 '--- 遅番が目標に届かない日数。bad には「目標-1 名未満」の日数を返す ---
 Private Function AP_遅番不足日数(ByRef bad As Long) As Long
-    Dim j As Long, n As Long, dayLate As Long
+    Dim j As Long, n As Long, dayLate As Long, tgt As Long
     On Error GoTo ErrHandler
 
 10  bad = 0
 20  For j = 1 To mND
 30      If mDayIn(j) Then
-40          dayLate = AP_日別遅番数(j)
-50          If dayLate < mLateMin Then n = n + 1
-60          If dayLate < mLateMin - 1 Then bad = bad + 1
+40          dayLate = AP_日別遅番数(j): tgt = AP_遅番目標(j)
+50          If dayLate < tgt Then n = n + 1
+60          If dayLate < tgt - 1 Then bad = bad + 1
 70      End If
 80  Next j
 90  AP_遅番不足日数 = n
@@ -830,6 +945,9 @@ End Function
 
 
 '--- 連勤上限超えの緩和: 連勤の中央を休みにし、他の自動公休と入替 ---
+'    v9.7.0: 週N日の人は入替先を同じ週に限る。月内のどこへでも移すと
+'    週あたりの勤務日数が変わり、週N日の指定が崩れるため。
+'    (週4日は4連勤になり得るので、この処理が実際に発火する)
 Private Sub RepairRuns(ByVal i As Long)
     On Error GoTo ErrHandler
     Dim j As Long, L As Long, lft As Long, rgt As Long
@@ -852,7 +970,7 @@ Private Sub RepairRuns(ByVal i As Long)
                 If cand > 0 Then
                     bk = 0: bs = -1E+30
                     For k = 1 To mND
-                        If mPlan(i, k) = ST_OFF Then
+                        If mPlan(i, k) = ST_OFF And RR_同じ週か(i, k, cand) Then
                             If WorkRunIf(i, k) <= mMaxRun Then
                                 sc = 0
                                 If mKind(i) = KIND_PH Then sc = mDayReq(k) - mCov(k)
@@ -880,62 +998,469 @@ ErrHandler:
 End Sub
 
 
-'--- 医師5名日の出勤を均等化(通常ルールの薬剤師間で誤差1以内を目標) ---
-Public Sub FiveBalance()
+'--- 入替先として使ってよい日か(週N日の人は同じ週の中だけ) ---
+Private Function RR_同じ週か(ByVal i As Long, ByVal k As Long, _
+                             ByVal cand As Long) As Boolean
     On Error GoTo ErrHandler
-    Dim pass As Long, i As Long, j As Long, f As Long
-    Dim mxI As Long, mnI As Long, mxV As Long, mnV As Long
-    Dim d5 As Long, dx As Long, swapped As Boolean
-    For pass = 1 To 100
-        mxI = 0: mnI = 0: mxV = -1: mnV = 32767
-        For i = 1 To mNP
-            If Not mSkipRow(i) Then
-            If mKind(i) = KIND_PH And Not mLeave(i) And mRule(i) = "通常" Then
-                f = FiveCnt(i)
-                If f > mxV Then mxV = f: mxI = i
-                If f < mnV Then mnV = f: mnI = i
-            End If
-            End If
-        Next i
-        If mxI = 0 Or mnI = 0 Or mxI = mnI Then Exit Sub
-        If mxV - mnV <= 1 Then Exit Sub
-        swapped = False
-        d5 = 0: dx = 0
-        For j = 1 To mND
-            If mDayIn(j) And mDayDoc(j) = 5 And mPlan(mxI, j) = ST_WORK Then d5 = j: Exit For
-        Next j
-        For j = 1 To mND
-            If mDayIn(j) And mDayDoc(j) <> 5 And mPlan(mxI, j) = ST_OFF Then
-                If WorkRunIf(mxI, j) <= mMaxRun Then dx = j: Exit For
-            End If
-        Next j
-        If d5 > 0 And dx > 0 Then
-            mPlan(mxI, d5) = ST_OFF: mPlan(mxI, dx) = ST_WORK
-            CovAdd mxI, d5, -1: CovAdd mxI, dx, 1
-            swapped = True
-        End If
-        If Not swapped Then
-            d5 = 0: dx = 0
-            For j = 1 To mND
-                If mDayIn(j) And mDayDoc(j) = 5 And mPlan(mnI, j) = ST_OFF Then
-                    If WorkRunIf(mnI, j) <= mMaxRun Then d5 = j: Exit For
-                End If
-            Next j
-            For j = 1 To mND
-                If mDayIn(j) And mDayDoc(j) <> 5 And mPlan(mnI, j) = ST_WORK Then dx = j: Exit For
-            Next j
-            If d5 > 0 And dx > 0 Then
-                mPlan(mnI, d5) = ST_WORK: mPlan(mnI, dx) = ST_OFF
-                CovAdd mnI, d5, 1: CovAdd mnI, dx, -1
-                swapped = True
-            End If
-        End If
-        If Not swapped Then Exit Sub
-    Next pass
+
+10  If mRule(i) <> "週N日" Then
+20      RR_同じ週か = True
+30  Else
+40      RR_同じ週か = (mWkKey(k) = mWkKey(cand))
+50  End If
+    Exit Function
+ErrHandler:
+    LogError MODULE_NAME, "RR_同じ週か", Err.Number, Err.Description, Erl, _
+             "i=" & i & "; k=" & k & "; cand=" & cand
+    RR_同じ週か = False
+End Function
+
+
+'==================================================================
+'  日別の過不足を均す (v9.4.0)
+'    個人の休日数は変えずに、余裕のある日の出勤を不足している日へ移す。
+'    不足が大きい日から順に埋めるため、必要数(医師数+n)の大きい日
+'    すなわち5診日から先に埋まり、次に4診日・3診日となる。
+'==================================================================
+Public Sub CoverBalance()
+    Dim pass As Long, moves As Long
+    Dim before As Double
+    On Error GoTo ErrHandler
+
+10  before = CB_評価()
+20  For pass = 1 To CB_MAX_PASS
+30      If Not CB_1名移す() Then Exit For
+40      moves = moves + 1
+50  Next pass
+
+    '--- 1手も動かないときに、どこで詰まっているかを残す ---
+    LogSuccess MODULE_NAME, "CoverBalance", _
+               "score " & before & " -> " & CB_評価() & "; moves=" & moves & _
+               "; " & CB_診断()
     Exit Sub
 ErrHandler:
-    LogError MODULE_NAME, "FiveBalance", Err.Number, Err.Description, Erl, ""
+    LogError MODULE_NAME, "CoverBalance", Err.Number, Err.Description, Erl, _
+             "pass=" & pass & "; moves=" & moves
 End Sub
+
+'--- 交換の候補が何組あるかを数える(1手も動かないときの切り分け用) ---
+'    shortDays  不足している日数
+'    movable    日を動かしてよい人数
+'    canWork    公休を出勤に変えられる (人,日) の組
+'    canRest    出勤を公休に変えられる (人,日) の組(日単位の条件のみ)
+'    rawPairs   日単位の条件だけで成立する交換の組
+'    pairs      連勤・連休まで見て実際に成立する交換の組
+'    blkRun     連勤の上限で消えた組
+'    blkOff     連休の上限で消えた組(連勤は通ったもの)
+'    canWork か canRest が 0 ならそちら側で詰まっている。
+'    rawPairs=0 なら「その日に出られる人」と「休める日を持つ人」が
+'    別人で、1人1日の入替では届かない(2人の玉突きが要る)。
+'    rawPairs>0 で pairs=0 なら上限で弾かれている。blkRun が大きければ
+'    「不足を埋めるときの連勤上限の上乗せ」を1にすると届く。
+Private Function CB_診断() As String
+    Dim i As Long, j As Long, jf As Long
+    Dim nShort As Long, nMove As Long, nIn As Long, nOut As Long
+    Dim nPair As Long, nRaw As Long, nBlkR As Long, nBlkO As Long
+    On Error GoTo ErrHandler
+
+10  For j = 1 To mND
+20      If mDayIn(j) Then
+30          If mDayReq(j) - mCov(j) > 0 Then nShort = nShort + 1
+40      End If
+50  Next j
+60  For i = 1 To mNP
+70      If CB_対象者か(i) Then
+80          nMove = nMove + 1
+90          For j = 1 To mND
+100             If CB_入れられるか(i, j) Then
+110                 nIn = nIn + 1
+120                 For jf = 1 To mND
+130                     If CB_抜けるか(i, jf, j) Then
+132                         nRaw = nRaw + 1
+134                         If CB_交換できるか(i, j, jf) Then
+136                             nPair = nPair + 1
+138                         ElseIf CB_連勤で消えたか(i, j) Then
+140                             nBlkR = nBlkR + 1
+142                         Else
+144                             nBlkO = nBlkO + 1
+146                         End If
+150                     End If
+160                 Next jf
+170             End If
+180             If CB_休みにできるか(i, j) Then nOut = nOut + 1
+190         Next j
+200     End If
+210 Next i
+220 CB_診断 = "shortDays=" & nShort & "; movable=" & nMove & _
+             "; canWork=" & nIn & "; canRest=" & nOut & _
+             "; rawPairs=" & nRaw & "; pairs=" & nPair & _
+             "; blkRun=" & nBlkR & "; blkOff=" & nBlkO & _
+             "; runLimit=" & CB_連勤上限()
+    Exit Function
+ErrHandler:
+    LogError MODULE_NAME, "CB_診断", Err.Number, Err.Description, Erl, _
+             "i=" & i & "; j=" & j
+    CB_診断 = "(diagnosis failed)"
+End Function
+
+'--- 交換が消えた理由が連勤側か(診断用。連休側と区別する) ---
+Private Function CB_連勤で消えたか(ByVal i As Long, ByVal jTo As Long) As Boolean
+    On Error GoTo ErrHandler
+
+10  CB_連勤で消えたか = (WorkRunIf(i, jTo) > CB_連勤上限())
+    Exit Function
+ErrHandler:
+    LogError MODULE_NAME, "CB_連勤で消えたか", Err.Number, Err.Description, Erl, _
+             "i=" & i & "; jTo=" & jTo
+    CB_連勤で消えたか = False
+End Function
+
+'--- 日別カバレッジの評価値。小さいほど良い ---
+'    不足を二乗して合計する。不足2の日1つ(=4)より、不足1の日2つ(=2)の
+'    ほうが良いと評価されるため、不足が1日に固まらない。
+'    過剰は0扱い(余っていること自体は害ではない)。
+Private Function CB_評価() As Double
+    Dim j As Long, d As Long, s As Double
+    On Error GoTo ErrHandler
+
+10  For j = 1 To mND
+20      If mDayIn(j) Then
+30          d = mDayReq(j) - mCov(j)
+40          If d > 0 Then s = s + CDbl(d) * d
+50      End If
+60  Next j
+70  CB_評価 = s
+    Exit Function
+ErrHandler:
+    LogError MODULE_NAME, "CB_評価", Err.Number, Err.Description, Erl, "j=" & j
+    CB_評価 = 0
+End Function
+
+'--- 評価が最も改善する1手を打つ。改善しなければ False ---
+'    交換は「必要数を保てる日から抜いて、不足している日へ入れる」形に
+'    限る(CB_抜けるか)。抜いた日は交換の前後どちらも不足0なので評価に
+'    影響せず、交換後の評価は base - (2*d - 1) で確定する
+'    (d = 入れる日の不足)。総当たりで CB_評価 を呼び直した場合と同じ
+'    答えになり、人数×日数×日数×日数 の総当たりを避けられる。
+'    ※ CB_抜けるか の条件を緩めるときは、この式も見直すこと。
+Private Function CB_1名移す() As Boolean
+    Dim i As Long, jTo As Long, jFrom As Long, d As Long
+    Dim base As Double, best As Double, cur As Double
+    Dim bi As Long, bf As Long, bt As Long
+    On Error GoTo ErrHandler
+
+10  base = CB_評価()
+20  best = base: bi = 0: bf = 0: bt = 0
+30  For i = 1 To mNP
+40      If CB_対象者か(i) Then
+50          For jTo = 1 To mND
+60              If CB_入れられるか(i, jTo) Then
+70                  d = mDayReq(jTo) - mCov(jTo)
+80                  cur = base - (2 * CDbl(d) - 1)
+90                  If cur < best Then
+100                     jFrom = CB_抜ける日(i, jTo)
+110                     If jFrom > 0 Then best = cur: bi = i: bf = jFrom: bt = jTo
+120                 End If
+130             End If
+140         Next jTo
+150     End If
+160 Next i
+
+170 If bi = 0 Then Exit Function
+180 mPlan(bi, bt) = ST_WORK
+190 mPlan(bi, bf) = ST_OFF
+200 CovAdd bi, bt, 1
+210 CovAdd bi, bf, -1
+220 CB_1名移す = True
+    Exit Function
+ErrHandler:
+    LogError MODULE_NAME, "CB_1名移す", Err.Number, Err.Description, Erl, _
+             "i=" & i & "; from=" & jFrom & "; to=" & jTo
+End Function
+
+'--- 自動作成で日を動かしてよい人か ---
+'    手動(派遣など)は別軸で決まるので触らない。
+'    固定曜日は「その曜日に出る」ことが約束なので、日を移すと約束が
+'    崩れる。週N日は週内での移動だけ許す(CB_抜けるか で見る)。
+Private Function CB_対象者か(ByVal i As Long) As Boolean
+    On Error GoTo ErrHandler
+
+10  If mSkipRow(i) Then Exit Function
+20  If mLeave(i) Then Exit Function
+30  If mKind(i) <> KIND_PH Then Exit Function
+40  If mRule(i) = "手動" Then Exit Function
+50  If mRule(i) = "固定曜日" Then Exit Function
+60  CB_対象者か = True
+    Exit Function
+ErrHandler:
+    LogError MODULE_NAME, "CB_対象者か", Err.Number, Err.Description, Erl, "i=" & i
+    CB_対象者か = False
+End Function
+
+'--- その日を出勤にできるか(日単位の条件だけ) ---
+'    自動で置いた公休(ST_OFF)だけを動かす。希望休・有休(ST_FOFF)は
+'    絶対に触らない。
+'    連勤の上限はここでは見ない。抜く日が隣にあると、まだ出勤のままの
+'    抜く日を連勤に数えてしまうため、交換を決めた後に CB_交換できるか
+'    で「交換した後の状態」を見る。
+Private Function CB_入れられるか(ByVal i As Long, ByVal j As Long) As Boolean
+    On Error GoTo ErrHandler
+
+10  If Not mDayIn(j) Then Exit Function
+20  If mPlan(i, j) <> ST_OFF Then Exit Function
+30  If mDayReq(j) - mCov(j) <= 0 Then Exit Function
+40  CB_入れられるか = True
+    Exit Function
+ErrHandler:
+    LogError MODULE_NAME, "CB_入れられるか", Err.Number, Err.Description, Erl, _
+             "i=" & i & "; j=" & j
+    CB_入れられるか = False
+End Function
+
+'--- その日を公休にできるか(日単位の条件だけ) ---
+'    自動で置いた出勤(ST_WORK)だけを動かす。既存入力(ST_FWORK)は触らない。
+'    抜いた後もその日が必要数を保てることを条件にする(不足の付け替えを防ぐ)。
+'    連休の上限はここでは見ない(理由は CB_入れられるか と同じ)。
+Private Function CB_休みにできるか(ByVal i As Long, ByVal j As Long) As Boolean
+    On Error GoTo ErrHandler
+
+10  If Not mDayIn(j) Then Exit Function
+20  If mPlan(i, j) <> ST_WORK Then Exit Function
+30  If mCov(j) - 1 < mDayReq(j) Then Exit Function
+40  CB_休みにできるか = True
+    Exit Function
+ErrHandler:
+    LogError MODULE_NAME, "CB_休みにできるか", Err.Number, Err.Description, Erl, _
+             "i=" & i & "; j=" & j
+    CB_休みにできるか = False
+End Function
+
+'--- jTo へ回すために、その日を公休にしてよいか ---
+Private Function CB_抜けるか(ByVal i As Long, ByVal j As Long, _
+                             ByVal jTo As Long) As Boolean
+    On Error GoTo ErrHandler
+
+10  If j = jTo Then Exit Function
+20  If Not CB_休みにできるか(i, j) Then Exit Function
+    '--- 週N日の人は週をまたいで動かすと週の勤務日数が変わる ---
+30  If mRule(i) = "週N日" Then
+40      If mWkKey(j) <> mWkKey(jTo) Then Exit Function
+50  End If
+60  CB_抜けるか = True
+    Exit Function
+ErrHandler:
+    LogError MODULE_NAME, "CB_抜けるか", Err.Number, Err.Description, Erl, _
+             "i=" & i & "; j=" & j & "; jTo=" & jTo
+    CB_抜けるか = False
+End Function
+
+'--- 不足を埋める交換のときに許す連勤の上限 ---
+'    通常の配置(公休ノルマ・連勤緩和)は mMaxRun を守る。ここだけは
+'    設定した日数まで上乗せを許し、必要数に届かない日を埋める。
+'    労務上は例外的な措置なので、既定は上乗せなし(0)。
+Private Function CB_連勤上限() As Long
+    On Error GoTo ErrHandler
+
+10  CB_連勤上限 = mMaxRun + mRunBonus
+    Exit Function
+ErrHandler:
+    LogError MODULE_NAME, "CB_連勤上限", Err.Number, Err.Description, Erl, _
+             "maxRun=" & mMaxRun & "; bonus=" & mRunBonus
+    CB_連勤上限 = mMaxRun
+End Function
+
+'--- 実際に入れ替えてみて連勤・連休の上限に収まるか(必ず元に戻す) ---
+'    交換前の状態で見ると、抜く日が入れる日の隣にあるとき、
+'    まだ出勤のままの抜く日を連勤に数えてしまう。
+'    例: 8/22公休 8/23出勤 8/24公休 の人を 8/23→8/24 に移すとき、
+'    交換前に見ると 8/23 から続く連勤に 8/24 が足され、上限を超えたと
+'    判定されて弾かれる。交換後は 8/23 が公休なので実際には収まる。
+Private Function CB_交換できるか(ByVal i As Long, ByVal jTo As Long, _
+                                 ByVal jFrom As Long) As Boolean
+    Dim ok As Boolean
+    On Error GoTo ErrHandler
+
+10  mPlan(i, jTo) = ST_WORK
+20  mPlan(i, jFrom) = ST_OFF
+30  ok = (WorkRunIf(i, jTo) <= CB_連勤上限()) And (OffRunIf(i, jFrom) <= mMaxOffRun)
+40  mPlan(i, jTo) = ST_OFF
+50  mPlan(i, jFrom) = ST_WORK
+60  CB_交換できるか = ok
+    Exit Function
+ErrHandler:
+    '--- 途中で落ちても必ず元の状態に戻す ---
+    mPlan(i, jTo) = ST_OFF
+    mPlan(i, jFrom) = ST_WORK
+    LogError MODULE_NAME, "CB_交換できるか", Err.Number, Err.Description, Erl, _
+             "i=" & i & "; jTo=" & jTo & "; jFrom=" & jFrom
+    CB_交換できるか = False
+End Function
+
+'--- jTo へ回すために公休へ変える出勤日。最も余裕のある日を返す ---
+'    どの日を選んでも評価値は同じなので、余裕が大きい日から先に削る。
+Private Function CB_抜ける日(ByVal i As Long, ByVal jTo As Long) As Long
+    Dim j As Long, best As Long, bs As Long, s As Long
+    On Error GoTo ErrHandler
+
+10  best = 0: bs = -1
+20  For j = 1 To mND
+30      If CB_抜けるか(i, j, jTo) Then
+40          If CB_交換できるか(i, jTo, j) Then
+50              s = mCov(j) - mDayReq(j)
+60              If s > bs Then bs = s: best = j
+70          End If
+80      End If
+90  Next j
+100 CB_抜ける日 = best
+    Exit Function
+ErrHandler:
+    LogError MODULE_NAME, "CB_抜ける日", Err.Number, Err.Description, Erl, _
+             "i=" & i & "; jTo=" & jTo & "; j=" & j
+    CB_抜ける日 = 0
+End Function
+
+
+'--- 医師5名日の出勤を均等化(通常ルールの薬剤師間で誤差1以内を目標) ---
+'    v9.4.0: 日別の人数を減らす向きの入替を制限した。
+'    旧版は「最多の人を5診日から降ろす」分岐を先に試し、成功すると
+'    その巡回を終えていたため、成功するたびに5診日の出勤が1名ずつ
+'    減り続け、5診日が4診日より薄くなっていた。
+'    現版は (1)最少の人を混雑日へ乗せる向きを先に試し、
+'          (2)降ろす向きは、その日が必要数を保てるときだけ許す。
+'    どちらも余裕のある日との入替に限るため、全日が不足している月では
+'    何も動かさない(カバレッジを優先し、個人差はそのまま残す)。
+Public Sub FiveBalance()
+    Dim pass As Long, i As Long, f As Long
+    Dim mxI As Long, mnI As Long, mxV As Long, mnV As Long
+    Dim swapped As Boolean
+    On Error GoTo ErrHandler
+
+10  For pass = 1 To FB_MAX_PASS
+20      mxI = 0: mnI = 0: mxV = -1: mnV = CNT_INF
+30      For i = 1 To mNP
+40          If Not mSkipRow(i) Then
+50          If mKind(i) = KIND_PH And Not mLeave(i) And mRule(i) = "通常" Then
+60              f = FiveCnt(i)
+70              If f > mxV Then mxV = f: mxI = i
+80              If f < mnV Then mnV = f: mnI = i
+90          End If
+100         End If
+110     Next i
+120     If mxI = 0 Or mnI = 0 Or mxI = mnI Then Exit Sub
+130     If mxV - mnV <= 1 Then Exit Sub
+140     swapped = FB_混雑日へ乗せる(mnI)
+150     If Not swapped Then swapped = FB_混雑日から降ろす(mxI)
+160     If Not swapped Then Exit Sub
+170 Next pass
+    Exit Sub
+ErrHandler:
+    LogError MODULE_NAME, "FiveBalance", Err.Number, Err.Description, Erl, _
+             "pass=" & pass & "; maxIdx=" & mxI & "; minIdx=" & mnI
+End Sub
+
+'--- 混雑日の公休を出勤に変え、余裕のある非混雑日を休みにする ---
+Private Function FB_混雑日へ乗せる(ByVal i As Long) As Boolean
+    Dim j As Long, dBusy As Long, dSpare As Long
+    Dim bs As Double, d As Double
+    On Error GoTo ErrHandler
+
+    '--- 乗せる先: 混雑日のうち最も不足している日 ---
+10  dBusy = 0: bs = SCORE_INF
+20  For j = 1 To mND
+30      If mDayIn(j) And mDayDoc(j) = DOC_BUSY_N And mPlan(i, j) = ST_OFF Then
+40          If WorkRunIf(i, j) <= mMaxRun Then
+50              d = mDayReq(j) - mCov(j)
+60              If d > bs Then bs = d: dBusy = j
+70          End If
+80      End If
+90  Next j
+100 If dBusy = 0 Then Exit Function
+
+    '--- 抜く先: 必要数を保てる非混雑日のうち最も余裕のある日 ---
+110 dSpare = FB_余裕のある出勤日(i, dBusy)
+120 If dSpare = 0 Then Exit Function
+
+130 mPlan(i, dBusy) = ST_WORK
+140 mPlan(i, dSpare) = ST_OFF
+150 CovAdd i, dBusy, 1
+160 CovAdd i, dSpare, -1
+170 FB_混雑日へ乗せる = True
+    Exit Function
+ErrHandler:
+    LogError MODULE_NAME, "FB_混雑日へ乗せる", Err.Number, Err.Description, Erl, _
+             "i=" & i & "; busyDay=" & dBusy & "; spareDay=" & dSpare
+    FB_混雑日へ乗せる = False
+End Function
+
+'--- 混雑日の出勤を休みに変え、代わりに非混雑日へ出勤を移す ---
+'    抜いても必要数を割らない混雑日だけを対象にする。
+Private Function FB_混雑日から降ろす(ByVal i As Long) As Boolean
+    Dim j As Long, dBusy As Long, dPut As Long
+    Dim bs As Double, d As Double
+    On Error GoTo ErrHandler
+
+    '--- 降ろす先: 抜いても必要数を保てる混雑日のうち最も余裕のある日 ---
+10  dBusy = 0: bs = SCORE_INF
+20  For j = 1 To mND
+30      If mDayIn(j) And mDayDoc(j) = DOC_BUSY_N And mPlan(i, j) = ST_WORK Then
+40          If mCov(j) - 1 >= mDayReq(j) Then
+50              If OffRunIf(i, j) <= mMaxOffRun Then
+60                  d = mCov(j) - mDayReq(j)
+70                  If d > bs Then bs = d: dBusy = j
+80              End If
+90          End If
+100     End If
+110 Next j
+120 If dBusy = 0 Then Exit Function
+
+    '--- 乗せる先: 非混雑日の公休のうち最も不足している日 ---
+130 dPut = 0: bs = SCORE_INF
+140 For j = 1 To mND
+150     If mDayIn(j) And mDayDoc(j) <> DOC_BUSY_N And mPlan(i, j) = ST_OFF Then
+160         If WorkRunIf(i, j) <= mMaxRun Then
+170             d = mDayReq(j) - mCov(j)
+180             If d > bs Then bs = d: dPut = j
+190         End If
+200     End If
+210 Next j
+220 If dPut = 0 Then Exit Function
+
+230 mPlan(i, dBusy) = ST_OFF
+240 mPlan(i, dPut) = ST_WORK
+250 CovAdd i, dBusy, -1
+260 CovAdd i, dPut, 1
+270 FB_混雑日から降ろす = True
+    Exit Function
+ErrHandler:
+    LogError MODULE_NAME, "FB_混雑日から降ろす", Err.Number, Err.Description, Erl, _
+             "i=" & i & "; busyDay=" & dBusy & "; putDay=" & dPut
+    FB_混雑日から降ろす = False
+End Function
+
+'--- 抜いても必要数を割らない非混雑日のうち、最も余裕のある出勤日 ---
+Private Function FB_余裕のある出勤日(ByVal i As Long, ByVal exceptJ As Long) As Long
+    Dim j As Long, best As Long
+    Dim bs As Double, d As Double
+    On Error GoTo ErrHandler
+
+10  best = 0: bs = SCORE_INF
+20  For j = 1 To mND
+30      If mDayIn(j) And j <> exceptJ And mDayDoc(j) <> DOC_BUSY_N Then
+40          If mPlan(i, j) = ST_WORK And mCov(j) - 1 >= mDayReq(j) Then
+50              If OffRunIf(i, j) <= mMaxOffRun Then
+60                  d = mCov(j) - mDayReq(j)
+70                  If d > bs Then bs = d: best = j
+80              End If
+90          End If
+100     End If
+110 Next j
+120 FB_余裕のある出勤日 = best
+    Exit Function
+ErrHandler:
+    LogError MODULE_NAME, "FB_余裕のある出勤日", Err.Number, Err.Description, Erl, _
+             "i=" & i & "; exceptJ=" & exceptJ & "; j=" & j
+    FB_余裕のある出勤日 = 0
+End Function
 
 
 '--- ○●▲の個人差を均等化(誤差2以内を目標・同じ日の2人で記号を交換) ---
