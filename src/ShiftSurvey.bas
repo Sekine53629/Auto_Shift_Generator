@@ -1,6 +1,6 @@
 Option Explicit
 '==================================================================
-'  シフト表 構造調査マクロ ＜標準モジュール ShiftSurvey v2.0＞
+'  シフト表 構造調査マクロ ＜標準モジュール ShiftSurvey v2.1＞
 '  2026-08-27
 '
 '  目的:
@@ -15,6 +15,10 @@ Option Explicit
 '    MASK_NAMES = True のとき、既知の見出し以外のA列の文字列は
 '    「(氏名1)」等に伏せて出力する。B:AF のセルの値は出力しない
 '    (医師名・スタッフ名が出ないようにするため)。
+'
+'  v2.1 変更:
+'   ・パレットの定数一覧から廃止した IDX_DOC_LAST / IDX_NOTE_FIRST を外し、
+'     ラベルから求めた医師名の最終位置を出すよう変更。
 '
 '  v2.0 変更:
 '   ・パレットの内訳(インデックス/値の有無/塗り)を出力する節を追加
@@ -313,8 +317,10 @@ Private Function SV_WritePalette(ByVal rpt As Worksheet, ByVal ws As Worksheet, 
 185 r = SV_Row(rpt, r, Array("", "IDX_UNDO", IDX_UNDO))
 186 r = SV_Row(rpt, r, Array("", "IDX_EXPORT", IDX_EXPORT))
 190 r = SV_Row(rpt, r, Array("", "IDX_DOC_FIRST", IDX_DOC_FIRST))
-195 r = SV_Row(rpt, r, Array("", "IDX_DOC_LAST", IDX_DOC_LAST, "医師名の最終位置"))
-196 r = SV_Row(rpt, r, Array("", "IDX_NOTE_FIRST", IDX_NOTE_FIRST, "ここから先は備考スタンプ"))
+195 r = SV_Row(rpt, r, Array("", "医師名の最終位置", LastDoctorIndex(), _
+                             "ラベルが「" & LBL_DOCTORS & "」の最後の位置"))
+196 r = SV_Row(rpt, r, Array("", "DOC_SLOTS(生成時の枠数)", DOC_SLOTS, _
+                             "パレット生成で作る医師枠の数"))
 200 r = SV_Row(rpt, r, Array("", "パレットのセル数", pal.Cells.Count))
 210 r = r + 1
 

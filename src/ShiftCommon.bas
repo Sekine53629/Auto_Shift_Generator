@@ -1,7 +1,15 @@
 Option Explicit
 '==================================================================
-'  シフト表 共通モジュール ＜標準モジュール ShiftCommon v2.4＞
+'  シフト表 共通モジュール ＜標準モジュール ShiftCommon v2.5＞
 '  2026-08-27
+'
+'  v2.5: 医師名スタンプの判定を位置からラベルへ変更。
+'        パレット3行目が「医師」で始まるかで見る。
+'        医師枠を9→10に増やしたとき IDX_DOC_LAST が古いままで
+'        10人目が備考スタンプと誤判定された。位置固定をやめて解消。
+'        IDX_DOC_LAST / IDX_NOTE_FIRST を廃止し、代わりに
+'        LastDoctorIndex() / PaletteLabel() を追加。
+'        DOC_SLOTS は「生成時に作る枠数」としてのみ残す(9→10)。
 '
 '  v2.4: シフト記号(SYM_*)・区分(KIND_*)・★マーカー(MARKER_CHAR)を
 '        本モジュールに集約。IsEarlySym で ○/◯ の入力揺れを吸収する。
@@ -133,11 +141,11 @@ Public Const IDX_ERASE      As Long = 10  ' 消去(空白スタンプ)。記号�
 Public Const IDX_SYM_FIRST  As Long = 11  ' ○ の位置
 Public Const IDX_SYM_LAST   As Long = 13  ' ▲ の位置
 Public Const IDX_DOC_FIRST  As Long = 19  ' 医師名スタンプの開始位置
-Public Const DOC_SLOTS      As Long = 9   ' 医師名スタンプの数
-' 医師名スタンプの最終位置。これより後ろ(銀行など)は医師名ではない
-Public Const IDX_DOC_LAST   As Long = IDX_DOC_FIRST + DOC_SLOTS - 1
-' 備考スタンプの開始位置。医師名の次からパレット末尾までが備考用
-Public Const IDX_NOTE_FIRST As Long = IDX_DOC_LAST + 1
+' パレット生成で作る医師枠の数。判定には使わない(ラベルで見る)
+Public Const DOC_SLOTS      As Long = 10  ' 医師名スタンプの数
+' 医師名の範囲は IsDoctorStamp / LastDoctorIndex がラベルから求める。
+' 位置を定数で持つと枠の増減に追随できないため IDX_DOC_LAST /
+' IDX_NOTE_FIRST は廃止した(v2.5)。
 
 '--- 動作ボタン(モードにならず、ダブルクリックで即実行する) ---
 '    自動 / 戻す / 出力 の3つ。IDX_AUTO..IDX_EXPORT が連続していること。
@@ -256,17 +264,42 @@ ErrHandler:
 End Function
 
 '--- そのパレット番号が医師名スタンプか ---
-'    医師名は IDX_DOC_FIRST..IDX_DOC_LAST の範囲だけ。
-'    その後ろにも「銀行」などのスタンプが並ぶため、上限を必ず見ること。
+'    判定はラベル行(パレット本体行の LABEL_OFFSET 下)の文字が
+'    LBL_DOCTORS("医師")で始まるかで行う。
+'    位置を定数で持つと医師枠を増減したときに追随できない。
+'    実際にそれが起きた: 医師を9枠から10枠に増やしたとき、
+'    IDX_DOC_LAST が古いままで10人目が備考スタンプと誤判定された。
 Public Function IsDoctorStamp(ByVal idx As Long) As Boolean
+    Dim lab As String
     On Error GoTo ErrHandler
 
-10  IsDoctorStamp = (idx >= IDX_DOC_FIRST And idx <= IDX_DOC_LAST)
+10  lab = PaletteLabel(idx)
+20  If Len(lab) = 0 Then Exit Function
+30  IsDoctorStamp = (InStr(1, lab, LBL_DOCTORS, vbTextCompare) = 1)
     Exit Function
 ErrHandler:
     LogError MODULE_NAME, "IsDoctorStamp", Err.Number, Err.Description, Erl, _
-             "idx=" & idx
+             "idx=" & idx & "; label=" & lab
     IsDoctorStamp = False
+End Function
+
+'--- パレットの指定位置のラベル(3行目)を返す。範囲外なら空文字 ---
+'    ラベル行は必ず埋まる前提。本体行は背景色ボタンなどが空なので
+'    種別の判定には使えない。
+Public Function PaletteLabel(ByVal idx As Long) As String
+    Dim pal As Range
+    On Error GoTo ErrHandler
+
+10  If idx < 1 Then Exit Function
+20  Set pal = PaletteRange(ShiftSheet())
+30  If pal Is Nothing Then Exit Function
+40  If idx > pal.Cells.Count Then Exit Function
+50  PaletteLabel = Trim$(CStr(pal.Cells(1, idx).Offset(LABEL_OFFSET, 0).Value))
+    Exit Function
+ErrHandler:
+    LogError MODULE_NAME, "PaletteLabel", Err.Number, Err.Description, Erl, _
+             "idx=" & idx
+    PaletteLabel = ""
 End Function
 
 '--- そのパレット番号が動作ボタン(自動/戻す/出力)か ---
@@ -283,16 +316,44 @@ ErrHandler:
 End Function
 
 '--- そのパレット番号が備考スタンプか ---
-'    医師名の次からパレット末尾まで(銀行など)。備考行にしか押せない。
+'    最後の医師名より後ろにあるスタンプ(銀行など)。備考行にしか押せない。
+'    IsDoctorStamp と同じ理由でラベル基準にする。位置を定数で持たない。
 Public Function IsNoteStamp(ByVal idx As Long) As Boolean
+    Dim lastDoc As Long
     On Error GoTo ErrHandler
 
-10  IsNoteStamp = (idx >= IDX_NOTE_FIRST)
+10  If idx < 1 Then Exit Function
+    '--- 医師名スタンプ自身は備考スタンプではない ---
+20  If IsDoctorStamp(idx) Then Exit Function
+30  lastDoc = LastDoctorIndex()
+40  If lastDoc = 0 Then Exit Function
+50  IsNoteStamp = (idx > lastDoc)
     Exit Function
 ErrHandler:
     LogError MODULE_NAME, "IsNoteStamp", Err.Number, Err.Description, Erl, _
-             "idx=" & idx
+             "idx=" & idx & "; lastDoc=" & lastDoc
     IsNoteStamp = False
+End Function
+
+'--- 医師名スタンプの最終位置をラベルから求める(0 = 医師枠が無い) ---
+'    定数 IDX_DOC_LAST の代わり。枠を増減しても追随する。
+Public Function LastDoctorIndex() As Long
+    Dim pal As Range, i As Long
+    On Error GoTo ErrHandler
+
+10  Set pal = PaletteRange(ShiftSheet())
+20  If pal Is Nothing Then Exit Function
+30  For i = pal.Cells.Count To 1 Step -1
+40      If IsDoctorStamp(i) Then
+50          LastDoctorIndex = i
+60          Exit Function
+70      End If
+80  Next i
+    Exit Function
+ErrHandler:
+    LogError MODULE_NAME, "LastDoctorIndex", Err.Number, Err.Description, Erl, _
+             "i=" & i
+    LastDoctorIndex = 0
 End Function
 
 '--- 早番記号か(○ と ◯ の入力揺れを吸収する) ---

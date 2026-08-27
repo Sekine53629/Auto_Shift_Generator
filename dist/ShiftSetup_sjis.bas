@@ -1,7 +1,7 @@
 Attribute VB_Name = "ShiftSetup"
 Option Explicit
 '==================================================================
-'  シフト表 初期設定マクロ ＜標準モジュール ShiftSetup v2.4＞
+'  シフト表 初期設定マクロ ＜標準モジュール ShiftSetup v2.5＞
 '  2026-08-27
 '  ShiftCommon / ShiftSchema / ShiftClick と併用。
 '  シート上の位置はすべて ShiftCommon が解決する。
@@ -15,6 +15,12 @@ Option Explicit
 '      3) 集計行(医師数(診)/薬剤師出勤数/過不足)の数式
 '      4) 集計列(AH:AL)の見出しと数式
 '      5) 名前付き範囲の再定義(動的数式)
+'
+'  v2.5 変更:
+'   ・医師名スタンプの装飾を位置(IDX_DOC_FIRST..IDX_DOC_LAST)から
+'     ラベル判定(IsDoctorStamp)に変更。医師枠の増減に追随する。
+'   ・装飾のガードを IDX_NOTE_FIRST から IDX_SYM_LAST に変更。
+'     位置固定なのはモード・背景色・記号までなので、そこまでを見る。
 '
 '  v2.4 変更(検証報告 2026-08-27 の指摘に対応):
 '   ・パレットの名前付き範囲を静的アドレスから動的数式に変更
@@ -373,11 +379,13 @@ Private Sub SS_パレット装飾(ByVal pal As Range)
 
 10  fills = SS_FillColors()
 
-    '--- 定数がパレット幅を超えていないか(超えていたら装飾しない) ---
-15  If IDX_NOTE_FIRST > pal.Cells.Count Then
+    '--- 記号位置の定数がパレット幅を超えていないか ---
+    '    医師名の範囲はラベルで判定するので、ここで見るのは
+    '    位置固定のボタン(モード・背景色・記号)の最終位置まで。
+15  If IDX_SYM_LAST > pal.Cells.Count Then
 16      LogError MODULE_NAME, "SS_パレット装飾", 0, _
                  "パレットの幅が定数より狭いため装飾を中止", Erl, _
-                 "cells=" & pal.Cells.Count & "; needed=" & IDX_NOTE_FIRST
+                 "cells=" & pal.Cells.Count & "; needed=" & IDX_SYM_LAST
 17      Exit Sub
 18  End If
 
@@ -402,8 +410,9 @@ Private Sub SS_パレット装飾(ByVal pal As Range)
 110 Next i
 
     '--- 医師名スタンプは色分けして区別 ---
-120 For i = IDX_DOC_FIRST To IDX_DOC_LAST
-130     If i <= pal.Cells.Count Then
+    '    位置ではなくラベルで判定する。枠を増減しても追随する。
+120 For i = 1 To pal.Cells.Count
+130     If IsDoctorStamp(i) Then
 140         With pal.Cells(1, i)
                 .Interior.Color = ClrInputBg()
                 .Font.Color = ClrDocFg()
