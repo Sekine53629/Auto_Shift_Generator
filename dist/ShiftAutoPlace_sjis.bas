@@ -1,8 +1,14 @@
 Attribute VB_Name = "ShiftAutoPlace"
 Option Explicit
 '==================================================================
-'  ShiftAutoPlace v9.8.0
+'  ShiftAutoPlace v9.9.0
 '  公休の配置・均等化アルゴリズムと後半工程。
+'  v9.9.0: 1人1日の入替で届かないとき、2人の玉突きを試すようにした。
+'          不足日に入れる人が隣接日を手放せば連勤に収まるのに、その
+'          隣接日に余裕が無いために抜けない、という詰まり方をしていた。
+'          隣接日を別の人が引き受ければ全員の休日数を変えずに解ける。
+'          CB_連勤で消えたか が盤面を戻した後に測っており、blkRun と
+'          blkOff を取り違えていたのを修正。
 '  v9.8.0: 不足を埋める交換のときだけ連勤上限に mRunBonus を足せる
 '          ようにした。診断ログが rawPairs=20 / pairs=0 を示し、日単位
 '          では成立する交換20組がすべて連勤・連休の上限で消えていた
@@ -1024,24 +1030,31 @@ End Function
 '    すなわち5診日から先に埋まり、次に4診日・3診日となる。
 '==================================================================
 Public Sub CoverBalance()
-    Dim pass As Long, moves As Long
+    Dim pass As Long, moves As Long, chains As Long
     Dim before As Double
     On Error GoTo ErrHandler
 
+    '--- まず1人1日の入替を試し、届かなければ2人の玉突きに落とす。
+    '    玉突きは探索が広いので、単独で解ける限りは使わない ---
 10  before = CB_評価()
 20  For pass = 1 To CB_MAX_PASS
-30      If Not CB_1名移す() Then Exit For
-40      moves = moves + 1
-50  Next pass
+30      If CB_1名移す() Then
+40          moves = moves + 1
+50      ElseIf CB_2名移す() Then
+60          moves = moves + 1: chains = chains + 1
+70      Else
+80          Exit For
+90      End If
+100 Next pass
 
     '--- 1手も動かないときに、どこで詰まっているかを残す ---
     LogSuccess MODULE_NAME, "CoverBalance", _
                "score " & before & " -> " & CB_評価() & "; moves=" & moves & _
-               "; " & CB_診断()
+               "; chains=" & chains & "; " & CB_診断()
     Exit Sub
 ErrHandler:
     LogError MODULE_NAME, "CoverBalance", Err.Number, Err.Description, Erl, _
-             "pass=" & pass & "; moves=" & moves
+             "pass=" & pass & "; moves=" & moves & "; chains=" & chains
 End Sub
 
 '--- 交換の候補が何組あるかを数える(1手も動かないときの切り分け用) ---
@@ -1080,7 +1093,7 @@ Private Function CB_診断() As String
 132                         nRaw = nRaw + 1
 134                         If CB_交換できるか(i, j, jf) Then
 136                             nPair = nPair + 1
-138                         ElseIf CB_連勤で消えたか(i, j) Then
+138                         ElseIf CB_連勤で消えたか(i, j, jf) Then
 140                             nBlkR = nBlkR + 1
 142                         Else
 144                             nBlkO = nBlkO + 1
@@ -1105,14 +1118,25 @@ ErrHandler:
 End Function
 
 '--- 交換が消えた理由が連勤側か(診断用。連休側と区別する) ---
-Private Function CB_連勤で消えたか(ByVal i As Long, ByVal jTo As Long) As Boolean
+'    CB_交換できるか は判定後に盤面を戻すため、戻ったあとで測ると
+'    抜く日が出勤のままになり連勤を多く数える。ここでも入れ替えてから測る。
+Private Function CB_連勤で消えたか(ByVal i As Long, ByVal jTo As Long, _
+                                   ByVal jFrom As Long) As Boolean
+    Dim over As Boolean
     On Error GoTo ErrHandler
 
-10  CB_連勤で消えたか = (WorkRunIf(i, jTo) > CB_連勤上限())
+10  mPlan(i, jTo) = ST_WORK
+20  mPlan(i, jFrom) = ST_OFF
+30  over = (WorkRunIf(i, jTo) > CB_連勤上限())
+40  mPlan(i, jTo) = ST_OFF
+50  mPlan(i, jFrom) = ST_WORK
+60  CB_連勤で消えたか = over
     Exit Function
 ErrHandler:
+    mPlan(i, jTo) = ST_OFF
+    mPlan(i, jFrom) = ST_WORK
     LogError MODULE_NAME, "CB_連勤で消えたか", Err.Number, Err.Description, Erl, _
-             "i=" & i & "; jTo=" & jTo
+             "i=" & i & "; jTo=" & jTo & "; jFrom=" & jFrom
     CB_連勤で消えたか = False
 End Function
 
@@ -1319,6 +1343,117 @@ ErrHandler:
              "i=" & i & "; jTo=" & jTo & "; j=" & j
     CB_抜ける日 = 0
 End Function
+
+
+'==================================================================
+'  2人の玉突き (v9.9.0)
+'    1人1日の入替で不足日を埋められないときの逃げ道。
+'
+'      A: 不足日 D を出勤にし、代わりに中継日 X を公休にする
+'      B: その X を出勤にし、代わりに余裕のある Y を公休にする
+'
+'    D は +1、X は A が抜けて B が入るので差し引き 0、Y は -1。
+'    Y は余裕のある日に限るので不足には転じない。
+'    A も B も出勤日と公休日を1対1で入れ替えるだけなので、
+'    誰の月間休日数も変わらない。
+'
+'    X に余裕が要らないのが肝心なところ。単独の入替では X を手放せず、
+'    そのせいで A の連勤が縮まらずに弾かれていた。
+'==================================================================
+Private Function CB_2名移す() As Boolean
+    Dim d As Long, a As Long, x As Long, b As Long, y As Long
+    On Error GoTo ErrHandler
+
+10  For d = 1 To mND
+20      If CB_不足日か(d) Then
+30          For a = 1 To mNP
+40              If CB_入れられるか(a, d) Then
+50                  For x = 1 To mND
+60                      If CB_中継日か(a, d, x) Then
+70                          For b = 1 To mNP
+80                              If b <> a And CB_引き受けられるか(b, x) Then
+90                                  y = CB_抜ける日(b, x)
+100                                 If y > 0 Then
+110                                     CB_玉突きを打つ a, d, x, b, y
+120                                     CB_2名移す = True
+130                                     Exit Function
+140                                 End If
+150                             End If
+160                         Next b
+170                     End If
+180                 Next x
+190             End If
+200         Next a
+210     End If
+220 Next d
+    Exit Function
+ErrHandler:
+    LogError MODULE_NAME, "CB_2名移す", Err.Number, Err.Description, Erl, _
+             "d=" & d & "; a=" & a & "; x=" & x & "; b=" & b
+End Function
+
+'--- 必要数に届いていない日か ---
+Private Function CB_不足日か(ByVal j As Long) As Boolean
+    On Error GoTo ErrHandler
+
+10  If Not mDayIn(j) Then Exit Function
+20  CB_不足日か = (mDayReq(j) - mCov(j) > 0)
+    Exit Function
+ErrHandler:
+    LogError MODULE_NAME, "CB_不足日か", Err.Number, Err.Description, Erl, "j=" & j
+    CB_不足日か = False
+End Function
+
+'--- A が不足日 D と引き換えに手放せる中継日か ---
+'    ここでは日の余裕を問わない。空いた分は B が埋めるため。
+Private Function CB_中継日か(ByVal i As Long, ByVal jTo As Long, _
+                             ByVal j As Long) As Boolean
+    On Error GoTo ErrHandler
+
+10  If j = jTo Then Exit Function
+20  If Not mDayIn(j) Then Exit Function
+30  If mPlan(i, j) <> ST_WORK Then Exit Function
+    '--- 週N日の人は週をまたいで動かすと週の勤務日数が変わる ---
+40  If mRule(i) = "週N日" Then
+50      If mWkKey(j) <> mWkKey(jTo) Then Exit Function
+60  End If
+70  CB_中継日か = CB_交換できるか(i, jTo, j)
+    Exit Function
+ErrHandler:
+    LogError MODULE_NAME, "CB_中継日か", Err.Number, Err.Description, Erl, _
+             "i=" & i & "; jTo=" & jTo & "; j=" & j
+    CB_中継日か = False
+End Function
+
+'--- B が中継日 X を引き受けられるか(その日が自動の公休か) ---
+Private Function CB_引き受けられるか(ByVal i As Long, ByVal j As Long) As Boolean
+    On Error GoTo ErrHandler
+
+10  If Not CB_対象者か(i) Then Exit Function
+20  If Not mDayIn(j) Then Exit Function
+30  If mPlan(i, j) <> ST_OFF Then Exit Function
+40  CB_引き受けられるか = True
+    Exit Function
+ErrHandler:
+    LogError MODULE_NAME, "CB_引き受けられるか", Err.Number, Err.Description, Erl, _
+             "i=" & i & "; j=" & j
+    CB_引き受けられるか = False
+End Function
+
+'--- 玉突きを確定する(4か所を対で動かす) ---
+Private Sub CB_玉突きを打つ(ByVal a As Long, ByVal d As Long, ByVal x As Long, _
+                            ByVal b As Long, ByVal y As Long)
+    On Error GoTo ErrHandler
+
+10  mPlan(a, d) = ST_WORK: CovAdd a, d, 1
+20  mPlan(a, x) = ST_OFF: CovAdd a, x, -1
+30  mPlan(b, x) = ST_WORK: CovAdd b, x, 1
+40  mPlan(b, y) = ST_OFF: CovAdd b, y, -1
+    Exit Sub
+ErrHandler:
+    LogError MODULE_NAME, "CB_玉突きを打つ", Err.Number, Err.Description, Erl, _
+             "a=" & a & "; d=" & d & "; x=" & x & "; b=" & b & "; y=" & y
+End Sub
 
 
 '--- 医師5名日の出勤を均等化(通常ルールの薬剤師間で誤差1以内を目標) ---
