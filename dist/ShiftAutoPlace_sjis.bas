@@ -1,8 +1,11 @@
 Attribute VB_Name = "ShiftAutoPlace"
 Option Explicit
 '==================================================================
-'  ShiftAutoPlace v9.11.1
+'  ShiftAutoPlace v9.12.0
 '  公休の配置・均等化アルゴリズムと後半工程。
+'  v9.12.0: 週N日と固定曜日が守られているかを結果レポートで検証する。
+'          守るための判定は各所に入れてあるが、守れているかを確かめる
+'          手段が無かった。マクロ自身の週の切り方(日曜起点)で数える。
 '  v9.11.1: FB_診断 の ok=0 を連勤側と連休側に分けた。cand=20/ok=0 と
 '          出たとき、どちらの上限を緩めれば届くかが分かるようにする。
 '  v9.11.0: ログに版を刻み、FiveBalance にも結果と詰まりを出させた。
@@ -57,7 +60,7 @@ Option Explicit
 Private Const MODULE_NAME As String = "ShiftAutoPlace"
 ' ログに刻む版。冒頭の版表記と必ず揃えること。
 ' 取り込み漏れで古い版が動いていないかを、ログだけで判別するために使う
-Private Const MODULE_VER As String = "v9.11.1"
+Private Const MODULE_VER As String = "v9.12.0"
 
 ' 候補選択の初期値(これより小さいカウントを探す)
 Private Const CNT_INF As Long = 32767
@@ -710,6 +713,7 @@ Private Function AP_レポート警告() As String
               IIf(lateBad > 0, "　■ うち目標-1名未満: " & lateBad & "日", "") & vbCrLf
 110 End If
 
+113 msg = msg & AP_勤務ルールの検証()
 115 msg = msg & AP_連勤上乗せの影響()
 120 shortN = AP_必要数不足日数(worst)
 130 If shortN > 0 Then
@@ -725,6 +729,85 @@ ErrHandler:
     LogError MODULE_NAME, "AP_レポート警告", Err.Number, Err.Description, Erl, _
              "nd=" & mND
     AP_レポート警告 = msg
+End Function
+
+'--- 週N日と固定曜日が守られているかを確かめる ---
+'    守るための判定は配置の各所に入れてあるが、守れたかを確かめる手段が
+'    無かった。ここでマクロ自身の週の切り方(日曜起点)で数え直す。
+'    シート側の検証式と食い違ったときは、まずこの行を信じてよい。
+Private Function AP_勤務ルールの検証() As String
+    Dim i As Long, msg As String
+    On Error GoTo ErrHandler
+
+10  For i = 1 To mNP
+20      If Not mSkipRow(i) And Not mLeave(i) Then
+30          If mRule(i) = "週N日" Then
+40              msg = msg & AP_週N日の検証(i)
+50          ElseIf mRule(i) = "固定曜日" Then
+60              msg = msg & AP_固定曜日の検証(i)
+70          End If
+80      End If
+90  Next i
+100 If Len(msg) = 0 Then Exit Function
+110 AP_勤務ルールの検証 = vbCrLf & "■ 勤務ルールが守られていません" & vbCrLf & msg & _
+        "　→ 配置の不具合です。週は日曜起点で数えています。" & vbCrLf
+    Exit Function
+ErrHandler:
+    LogError MODULE_NAME, "AP_勤務ルールの検証", Err.Number, Err.Description, Erl, _
+             "i=" & i
+    AP_勤務ルールの検証 = ""
+End Function
+
+'--- 週N日: 週ごとの勤務日数が目標と合っているか ---
+'    目標は AS_週N日ルール と同じ式で出す(月内の日数に比例させる)。
+Private Function AP_週N日の検証(ByVal i As Long) As String
+    Dim w As Long, j As Long, cnt As Long, wk As Long, tgt As Long
+    Dim msg As String
+    On Error GoTo ErrHandler
+
+10  For w = 1 To mNW
+20      cnt = 0: wk = 0
+30      For j = 1 To mND
+40          If mDayIn(j) And mWkKey(j) = mWkList(w) Then
+50              cnt = cnt + 1
+60              If mPlan(i, j) = ST_WORK Or mPlan(i, j) = ST_FWORK Then wk = wk + 1
+70          End If
+80      Next j
+90      tgt = Int(mWeekN(i) * cnt / 7 + 0.5)
+100     If tgt > cnt Then tgt = cnt
+110     If wk > tgt Then
+120         msg = msg & "・" & mName(i) & " : " & Format(CDate(mWkList(w)), "m/d") & _
+                   "の週 出勤" & wk & "日 (目標" & tgt & "日)" & vbCrLf
+130     End If
+140 Next w
+150 AP_週N日の検証 = msg
+    Exit Function
+ErrHandler:
+    LogError MODULE_NAME, "AP_週N日の検証", Err.Number, Err.Description, Erl, _
+             "i=" & i & "; w=" & w
+    AP_週N日の検証 = msg
+End Function
+
+'--- 固定曜日: 指定外の曜日に出ていないか ---
+Private Function AP_固定曜日の検証(ByVal i As Long) As String
+    Dim j As Long, n As Long
+    On Error GoTo ErrHandler
+
+10  For j = 1 To mND
+20      If mDayIn(j) Then
+30          If mPlan(i, j) = ST_WORK Then
+40              If Not mWD(i, mDayWD(j)) Then n = n + 1
+50          End If
+60      End If
+70  Next j
+80  If n > 0 Then
+90      AP_固定曜日の検証 = "・" & mName(i) & " : 指定外の曜日に" & n & "日 出勤" & vbCrLf
+100 End If
+    Exit Function
+ErrHandler:
+    LogError MODULE_NAME, "AP_固定曜日の検証", Err.Number, Err.Description, Erl, _
+             "i=" & i & "; j=" & j
+    AP_固定曜日の検証 = ""
 End Function
 
 '--- 連勤の上乗せを使った結果、通常上限を超えた人を出す ---
