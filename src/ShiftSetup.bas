@@ -1,6 +1,6 @@
 Option Explicit
 '==================================================================
-'  シフト表 初期設定マクロ ＜標準モジュール ShiftSetup v2.5＞
+'  シフト表 初期設定マクロ ＜標準モジュール ShiftSetup v2.6＞
 '  2026-08-27
 '  ShiftCommon / ShiftSchema / ShiftClick と併用。
 '  シート上の位置はすべて ShiftCommon が解決する。
@@ -14,6 +14,10 @@ Option Explicit
 '      3) 集計行(医師数(診)/薬剤師出勤数/過不足)の数式
 '      4) 集計列(AH:AL)の見出しと数式
 '      5) 名前付き範囲の再定義(動的数式)
+'
+'  v2.6 変更:
+'   ・パレットの医師名ラベルをリテラル "医師" から
+'     ShiftCommon.LBL_DOC_STAMP に変更。判定側と同じ定数を見るため。
 '
 '  v2.5 変更:
 '   ・医師名スタンプの装飾を位置(IDX_DOC_FIRST..IDX_DOC_LAST)から
@@ -194,7 +198,7 @@ Private Function SS_PalLabs() As Variant
 70      k = k + 1
 80  Next i
 90  For i = 1 To DOC_SLOTS
-100     arr(k) = "医師"
+100     arr(k) = LBL_DOC_STAMP
 110     k = k + 1
 120 Next i
 130 For i = LBound(tail) To UBound(tail)

@@ -1,8 +1,15 @@
 Attribute VB_Name = "ShiftCommon"
 Option Explicit
 '==================================================================
-'  シフト表 共通モジュール ＜標準モジュール ShiftCommon v2.5＞
+'  シフト表 共通モジュール ＜標準モジュール ShiftCommon v2.6＞
 '  2026-08-27
+'
+'  v2.6: v2.5 の判定が一度も True にならなかったのを修正。
+'        判定に LBL_DOCTORS("医師名")を使っていたが、パレット3行目に
+'        実際に書かれるのは "医師" で、前方一致にならなかった。
+'        LBL_DOCTORS はA列(シートの医師名欄)のラベルであり別物。
+'        パレット用に LBL_DOC_STAMP("医師")を分け、生成側の
+'        SS_PalLabs と判定側の IsDoctorStamp が同じ定数を見るようにした。
 '
 '  v2.5: 医師名スタンプの判定を位置からラベルへ変更。
 '        パレット3行目が「医師」で始まるかで見る。
@@ -88,7 +95,11 @@ Public Const LBL_PHARM    As String = "薬剤師出勤数"
 Public Const LBL_CLERK    As String = "事務員出勤数"
 Public Const LBL_SHORT    As String = "過不足"
 Public Const LBL_PALETTE  As String = "シフトパレット"
-Public Const LBL_DOCTORS  As String = "医師名"
+Public Const LBL_DOCTORS  As String = "医師名"   ' A列: シートの医師名欄
+'--- パレット3行目(ラベル行)に入る医師名スタンプの表示 ---
+'    A列の LBL_DOCTORS("医師名")とは別物。パレットには "医師" と書く。
+'    生成(SS_PalLabs)と判定(IsDoctorStamp)が同じ定数を見ること。
+Public Const LBL_DOC_STAMP As String = "医師"
 
 '--- 名前付き範囲の名前 ---
 Public Const NM_SHIFT   As String = "シフトパレット範囲"
@@ -266,7 +277,9 @@ End Function
 
 '--- そのパレット番号が医師名スタンプか ---
 '    判定はラベル行(パレット本体行の LABEL_OFFSET 下)の文字が
-'    LBL_DOCTORS("医師")で始まるかで行う。
+'    LBL_DOC_STAMP("医師")で始まるかで行う。
+'    A列用の LBL_DOCTORS("医師名")ではない。取り違えると
+'    前方一致にならず、判定が一度も True にならない(v2.5 の不具合)。
 '    位置を定数で持つと医師枠を増減したときに追随できない。
 '    実際にそれが起きた: 医師を9枠から10枠に増やしたとき、
 '    IDX_DOC_LAST が古いままで10人目が備考スタンプと誤判定された。
@@ -276,7 +289,7 @@ Public Function IsDoctorStamp(ByVal idx As Long) As Boolean
 
 10  lab = PaletteLabel(idx)
 20  If Len(lab) = 0 Then Exit Function
-30  IsDoctorStamp = (InStr(1, lab, LBL_DOCTORS, vbTextCompare) = 1)
+30  IsDoctorStamp = (InStr(1, lab, LBL_DOC_STAMP, vbTextCompare) = 1)
     Exit Function
 ErrHandler:
     LogError MODULE_NAME, "IsDoctorStamp", Err.Number, Err.Description, Erl, _
