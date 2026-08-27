@@ -50,7 +50,7 @@
 | `ShiftCommon` | v3.0 | **共通土台。** シート名・ラベル・行列オフセット・記号・区分・範囲解決を一元管理 |
 | `ErrorLogger` | — | エラー／成功ログを `C:\VBAErrorLogs\` に CSV 出力 |
 | `ShiftAuto`<br>(`AutoShiftGenerator`) | v9.7.0 | 自動作成の入口と前半工程（準備・メンバー読込・週リスト） |
-| `ShiftAutoPlace` | v9.8.0 | 公休の配置・均等化アルゴリズムと記号割当・書き込み・結果レポート |
+| `ShiftAutoPlace` | v9.9.0 | 公休の配置・均等化アルゴリズムと記号割当・書き込み・結果レポート |
 | `ShiftAutoLog` | v9.5.0 | 設定チェック・変更ログ・戻す・白紙化と共通ヘルパー |
 | `ShiftClick` | v9.4 | クリック入力（パレットのモード切替・スタンプ・連続切替） |
 | `ShiftSchema` | v1.5 | 不足シートの生成 |
