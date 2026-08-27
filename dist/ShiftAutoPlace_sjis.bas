@@ -1,8 +1,11 @@
 Attribute VB_Name = "ShiftAutoPlace"
 Option Explicit
 '==================================================================
-'  ShiftAutoPlace v9.9.0
+'  ShiftAutoPlace v9.9.1
 '  公休の配置・均等化アルゴリズムと後半工程。
+'  v9.9.1: 玉突きの A 側に CB_対象者か の判定が抜けていたのを修正。
+'          固定曜日の人が非固定曜日に引き出され、曜日の約束が
+'          崩れる可能性があった(B 側には元から入っていた)。
 '  v9.9.0: 1人1日の入替で届かないとき、2人の玉突きを試すようにした。
 '          不足日に入れる人が隣接日を手放せば連勤に収まるのに、その
 '          隣接日に余裕が無いために抜けない、という詰まり方をしていた。
@@ -1367,7 +1370,7 @@ Private Function CB_2名移す() As Boolean
 10  For d = 1 To mND
 20      If CB_不足日か(d) Then
 30          For a = 1 To mNP
-40              If CB_入れられるか(a, d) Then
+40              If CB_対象者か(a) And CB_入れられるか(a, d) Then
 50                  For x = 1 To mND
 60                      If CB_中継日か(a, d, x) Then
 70                          For b = 1 To mNP
