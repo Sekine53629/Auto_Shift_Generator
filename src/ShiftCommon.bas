@@ -131,6 +131,9 @@ Public Const IDX_ERASE      As Long = 8   ' 消去(空白スタンプ)。記号�
 Public Const IDX_SYM_FIRST  As Long = 9   ' ○ の位置
 Public Const IDX_SYM_LAST   As Long = 11  ' ▲ の位置
 Public Const IDX_DOC_FIRST  As Long = 17  ' 医師名スタンプの開始位置
+Public Const DOC_SLOTS      As Long = 9   ' 医師名スタンプの数
+' 医師名スタンプの最終位置。これより後ろ(銀行など)は医師名ではない
+Public Const IDX_DOC_LAST   As Long = IDX_DOC_FIRST + DOC_SLOTS - 1
 
 '--- ★マーカー(選択中のパレット位置を示す文字) ---
 Public Const MARKER_CHAR As String = "★"
@@ -231,6 +234,20 @@ Public Function NamedRangeOrNothing(ByVal nm As String) As Range
 ErrHandler:
     ' 名前が無い/参照切れは正常系。呼び出し側でラベル計算に落とす
 20  Set NamedRangeOrNothing = Nothing
+End Function
+
+'--- そのパレット番号が医師名スタンプか ---
+'    医師名は IDX_DOC_FIRST..IDX_DOC_LAST の範囲だけ。
+'    その後ろにも「銀行」などのスタンプが並ぶため、上限を必ず見ること。
+Public Function IsDoctorStamp(ByVal idx As Long) As Boolean
+    On Error GoTo ErrHandler
+
+10  IsDoctorStamp = (idx >= IDX_DOC_FIRST And idx <= IDX_DOC_LAST)
+    Exit Function
+ErrHandler:
+    LogError MODULE_NAME, "IsDoctorStamp", Err.Number, Err.Description, Erl, _
+             "idx=" & idx
+    IsDoctorStamp = False
 End Function
 
 '--- 早番記号か(○ と ◯ の入力揺れを吸収する) ---

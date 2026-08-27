@@ -129,7 +129,7 @@
 
 <p><strong>選択中のモードは★マーカー</strong>（パレット本体の1行上）と、Excel下部のステータスバーに表示されます。</p>
 <div class="info">
-<strong>医師名スタンプの押せる場所</strong>　パレット右側の医師名は、<strong>医師名欄（日付行の2行下から5行）にだけ</strong>押せます。シフト入力欄には押せません。逆に医師名欄には <span class="sym">○</span> <span class="sym">●</span> <span class="sym">▲</span> や公休は押せず、<strong>消去</strong>と<strong>色消</strong>だけ受け付けます。医師名欄に出勤記号が混ざると <code>医師数(診)</code> のカウントがずれるためです。
+<strong>医師名スタンプの押せる場所</strong>　パレットの<strong>医師名だけ</strong>（<code>IDX_DOC_FIRST</code>〜<code>IDX_DOC_LAST</code> の9個）は、<strong>医師名欄（日付行の2行下から5行）にだけ</strong>押せます。シフト入力欄には押せません。逆に医師名欄には <span class="sym">○</span> <span class="sym">●</span> <span class="sym">▲</span> や公休は押せず、<strong>消去</strong>と<strong>色消</strong>だけ受け付けます。医師名欄に出勤記号が混ざると <code>医師数(診)</code> のカウントがずれるためです。<br><br><strong>医師名より後ろにある <code>銀行</code> は医師名ではありません。</strong>これは備考欄で使うスタンプなので、シフト入力欄（備考行を含む）に押せます。
 </div>
 
 <h3>パレットの操作マクロ</h3>

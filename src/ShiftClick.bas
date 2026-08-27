@@ -66,22 +66,20 @@ Private Function CycleValues(ByVal ws As Worksheet) As Variant
 40      Exit Function
 50  End If
 
-    '--- 巡回の終端: 医師名を含めない場合は医師名の直前まで ---
 60  lastIdx = pal.Cells.Count
-70  If Not CYCLE_INCLUDES_DOCTORS Then
-80      If IDX_DOC_FIRST - 1 < lastIdx Then lastIdx = IDX_DOC_FIRST - 1
-90  End If
-
 100 ReDim arr(0 To lastIdx)
 110 arr(0) = ""            ' 先頭は空白(消去)
 120 n = 0
     '--- IDX_ERASE から開始。モードボタン・背景色ボタンは巡回に入れない ---
+    '    医師名だけを飛ばす(その後ろの銀行などは巡回に残す)
 130 For i = IDX_ERASE To lastIdx
-140     v = Trim$(CStr(pal.Cells(1, i).Value))
-150     If Len(v) > 0 Then
-160         n = n + 1
-170         arr(n) = v
-180     End If
+135     If CYCLE_INCLUDES_DOCTORS Or Not IsDoctorStamp(i) Then
+140         v = Trim$(CStr(pal.Cells(1, i).Value))
+150         If Len(v) > 0 Then
+160             n = n + 1
+170             arr(n) = v
+180         End If
+185     End If
 190 Next i
 200 ReDim Preserve arr(0 To n)
 210 CycleValues = arr
@@ -282,16 +280,16 @@ End Function
 
 '--- その記号をその場所に押してよいか ---
 '    医師名欄  : 医師名スタンプ / 消去 / 色消 のみ
-'    入力欄    : 医師名スタンプ以外
+'    入力欄    : 医師名スタンプ以外(銀行などの備考用スタンプはここで使う)
 '    (医師名欄に ○▲ が入ると医師数の COUNTA がずれ、入力欄に医師名が入ると
 '     出勤記号として数えられないため、両方向で弾く)
 Private Function StampAllowedHere(ByVal idx As Long, ByVal inDoc As Boolean) As Boolean
     On Error GoTo ErrHandler
 
 10  If inDoc Then
-20      StampAllowedHere = (idx >= IDX_DOC_FIRST Or idx = IDX_ERASE Or idx = IDX_CLEARFILL)
+20      StampAllowedHere = (IsDoctorStamp(idx) Or idx = IDX_ERASE Or idx = IDX_CLEARFILL)
 30  Else
-40      StampAllowedHere = (idx < IDX_DOC_FIRST)
+40      StampAllowedHere = Not IsDoctorStamp(idx)
 50  End If
     Exit Function
 ErrHandler:

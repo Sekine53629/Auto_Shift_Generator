@@ -79,7 +79,6 @@ Private Const FS_TITLE  As Long = 14
 '  ※医師名は個人情報のためコードに実名を書かない。
 '    シフトシートの医師名欄に既に入っている値を優先して読む。
 '==================================================================
-Private Const DOC_SLOTS As Long = 9   ' 医師名スタンプの数
 
 Private Function SS_PalValsBase() As Variant
     On Error GoTo ErrHandler
@@ -380,7 +379,7 @@ Private Sub SS_パレット装飾(ByVal pal As Range)
 110 Next i
 
     '--- 医師名スタンプは色分けして区別 ---
-120 For i = IDX_DOC_FIRST To IDX_DOC_FIRST + DOC_SLOTS - 1
+120 For i = IDX_DOC_FIRST To IDX_DOC_LAST
 130     If i <= pal.Cells.Count Then
 140         With pal.Cells(1, i)
                 .Interior.Color = ClrInputBg()

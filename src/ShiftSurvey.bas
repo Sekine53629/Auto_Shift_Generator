@@ -309,6 +309,7 @@ Private Function SV_WritePalette(ByVal rpt As Worksheet, ByVal ws As Worksheet, 
 170 r = SV_Row(rpt, r, Array("", "IDX_SYM_FIRST", IDX_SYM_FIRST))
 180 r = SV_Row(rpt, r, Array("", "IDX_SYM_LAST", IDX_SYM_LAST))
 190 r = SV_Row(rpt, r, Array("", "IDX_DOC_FIRST", IDX_DOC_FIRST))
+195 r = SV_Row(rpt, r, Array("", "IDX_DOC_LAST", IDX_DOC_LAST, "これより後ろは医師名ではない"))
 200 r = SV_Row(rpt, r, Array("", "パレットのセル数", pal.Cells.Count))
 210 r = r + 1
 
@@ -321,7 +322,7 @@ Private Function SV_WritePalette(ByVal rpt As Worksheet, ByVal ws As Worksheet, 
 260     role = SV_PaletteRole(i)
 270     If pal.Cells(1, i).Interior.Pattern <> xlNone Then fill = "有" Else fill = ""
         '--- 医師名は伏せる ---
-280     If MASK_NAMES And i >= IDX_DOC_FIRST And Len(v) > 0 Then
+280     If MASK_NAMES And IsDoctorStamp(i) And Len(v) > 0 Then
 290         If lab = "医師" Then v = "(医師" & (i - IDX_DOC_FIRST + 1) & ")"
 300     End If
 310     r = SV_Row(rpt, r, Array("", i, pal.Cells(1, i).Address(False, False), _
@@ -352,7 +353,7 @@ Private Function SV_PaletteRole(ByVal idx As Long) As String
                                 SV_PaletteRole = "背景色ペイント"
             Case IDX_ERASE:     SV_PaletteRole = "消去(空白)"
             Case Else
-                If idx >= IDX_DOC_FIRST Then
+                If IsDoctorStamp(idx) Then
                     SV_PaletteRole = "医師名スタンプ"
                 ElseIf idx >= IDX_SYM_FIRST And idx <= IDX_SYM_LAST Then
                     SV_PaletteRole = "出勤記号"
