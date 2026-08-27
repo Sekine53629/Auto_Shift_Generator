@@ -434,7 +434,8 @@ Private Sub SC_祝日クエリを作る()
 20  On Error Resume Next
 30  wb.Queries(HOL_QUERY_NAME).Delete
 40  On Error GoTo ErrHandler
-50  wb.Queries.Add Name:=HOL_QUERY_NAME, Formula:=SC_祝日M式()
+    '--- Name は VBA の予約語。名前付き引数を避けて位置指定で渡す ---
+50  wb.Queries.Add HOL_QUERY_NAME, SC_祝日M式()
 
     LogSuccess MODULE_NAME, "SC_祝日クエリを作る", "query=" & HOL_QUERY_NAME
     Exit Sub
