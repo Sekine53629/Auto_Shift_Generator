@@ -1,7 +1,7 @@
 Attribute VB_Name = "ShiftSchema"
 Option Explicit
 '==================================================================
-'  シフト表 シート生成モジュール ＜標準モジュール ShiftSchema v1.1＞
+'  シフト表 シート生成モジュール ＜標準モジュール ShiftSchema v1.2＞
 '  2026-08-27
 '
 '  目的:
@@ -21,8 +21,26 @@ Option Explicit
 '    ShiftSchema_自動作成設定生成 … 個別
 '    ShiftSchema_祝日マスタ生成   … 個別
 '    ShiftSchema_変更ログ生成     … 個別
+'    ShiftSchema_祝日マスタ取込   … 内閣府の CSV を Power Query で取り込む
+'
+'  v1.2 変更:
+'   ・祝日マスタの取り込みを Power Query で行えるようにした。
+'     手で CSV を貼る運用も従来どおり使える。
 '==================================================================
 Private Const MODULE_NAME As String = "ShiftSchema"
+
+'--- 祝日マスタの取り込み(Power Query) ---
+'    内閣府が公開している「国民の祝日」CSV。Shift-JIS(932)・2列。
+'    URL が変わったらここだけ直す。
+Private Const HOL_SOURCE_URL  As String = _
+    "https://www8.cao.go.jp/chosei/shukujitsu/syukujitsu.csv"
+Private Const HOL_SOURCE_CP   As Long = 932    ' CSV の文字コード(Shift-JIS)
+Private Const HOL_QUERY_NAME  As String = "祝日マスタ取込"
+Private Const HOL_TABLE_NAME  As String = "祝日一覧"
+'    OLEDB 接続文字列のひな形。Power Query の出力を表として貼るのに使う
+Private Const PQ_CONN_HEAD    As String = _
+    "OLEDB;Provider=Microsoft.Mashup.OleDb.1;Data Source=$Workbook$;Location="
+Private Const PQ_CONN_TAIL    As String = ";Extended Properties="""""
 
 '--- 書式 ---
 Private Const FS_TITLE  As Long = 14
@@ -286,12 +304,25 @@ Public Sub ShiftSchema_祝日マスタ生成()
     '--- 使い方メモ(新規作成時のみ) ---
 120 If isNew Then
 130     With ws.Cells(HOL_HDR_ROW, HOL_COL_NAME + 2)
-            .Value = "内閣府の「国民の祝日」CSV を A/B 列に貼り付けてください。" & _
+            .Value = "ShiftSchema_祝日マスタ取込 を実行すると、内閣府の" & _
+                     "「国民の祝日」CSV を取り込みます。" & _
+                     "手で A/B 列に貼り付けても構いません。" & _
                      "シフト表の祝日カウントは A 列を参照します。"
             .Font.size = FS_NOTE
             .Font.Color = ClrSubFg()
 140     End With
 150 End If
+
+    '--- 中身が空なら取り込みを勧める(外部から取得するので必ず尋ねる) ---
+160 If SC_祝日データ行数(ws) = 0 And SC_PQ使用可() Then
+170     If MsgBox(SHT_HOLIDAY & " が空です。" & vbCrLf & _
+                  "内閣府の「国民の祝日」CSV を取り込みますか?" & vbCrLf & vbCrLf & _
+                  "取得元: " & HOL_SOURCE_URL & vbCrLf & _
+                  "_インターネットに接続します_", _
+                  vbYesNo + vbQuestion, SHT_HOLIDAY) = vbYes Then
+180         ShiftSchema_祝日マスタ取込
+190     End If
+200 End If
 
 CleanUp:
     On Error Resume Next
@@ -307,6 +338,207 @@ ErrHandler:
     MsgBox SHT_HOLIDAY & " の生成でエラーが発生しました: " & Err.Description, vbExclamation
     Resume CleanUp
 End Sub
+
+'==================================================================
+' 祝日マスタの取り込み (Power Query)
+'   内閣府の CSV を取り込んで A/B 列に展開する。
+'   以後は表を右クリック →「更新」で最新に貼り替えられる。
+'
+'   Power Query は Excel 2016 以降の機能。2013 以前では使えないので、
+'   その場合は従来どおり手で貼り付ける運用に戻す(判定は SC_PQ使用可)。
+'==================================================================
+Public Sub ShiftSchema_祝日マスタ取込()
+    Dim ws As Worksheet, lo As ListObject, isNew As Boolean
+    Dim n As Long
+    On Error GoTo ErrHandler
+
+10  If Not SC_PQ使用可() Then
+20      MsgBox "この Excel では Power Query を使えません_2016 以降が必要_。" & vbCrLf & _
+               "内閣府の CSV を " & SHT_HOLIDAY & " の A/B 列に貼り付けてください。", _
+               vbExclamation, SHT_HOLIDAY
+30      Exit Sub
+40  End If
+
+50  Set ws = SC_GetOrAdd(SHT_HOLIDAY, isNew)
+60  If ws Is Nothing Then Exit Sub
+
+    '--- 既に取り込み済みなら、作り直さず更新するだけ ---
+70  Set lo = SC_祝日テーブル(ws)
+80  If lo Is Nothing Then
+        '--- 手で貼った祝日が既にある場合は、消す前に確認する ---
+90      If SC_祝日データ行数(ws) > 0 Then
+100         If MsgBox(SHT_HOLIDAY & " の A/B 列に既にデータがあります。" & vbCrLf & _
+                      "Power Query の取り込みに切り替えると、この内容は" & vbCrLf & _
+                      "取得した祝日で置き換わります。" & vbCrLf & vbCrLf & _
+                      "切り替えますか?", vbYesNo + vbExclamation, SHT_HOLIDAY) <> vbYes Then
+110             Exit Sub
+120         End If
+130     End If
+140 End If
+
+150 Application.ScreenUpdating = False
+160 SC_祝日クエリを作る
+170 If lo Is Nothing Then Set lo = SC_祝日テーブルを作る(ws)
+180 If lo Is Nothing Then GoTo CleanUp
+190 lo.QueryTable.Refresh BackgroundQuery:=False
+200 n = lo.ListRows.Count
+210 ws.Columns(HOL_COL_DATE).NumberFormatLocal = "yyyy/m/d"
+
+220 MsgBox "祝日を " & n & " 件取り込みました。" & vbCrLf & vbCrLf & _
+           "以後は表の中で右クリック →「更新」で最新にできます。" & vbCrLf & _
+           "取得元: " & HOL_SOURCE_URL, vbInformation, SHT_HOLIDAY
+
+CleanUp:
+    On Error Resume Next
+    Application.ScreenUpdating = True
+    On Error GoTo 0
+    LogSuccess MODULE_NAME, "ShiftSchema_祝日マスタ取込", _
+               "Loaded " & n & " holidays from " & HOL_SOURCE_URL
+    Exit Sub
+
+ErrHandler:
+    LogError MODULE_NAME, "ShiftSchema_祝日マスタ取込", Err.Number, Err.Description, Erl, _
+             "url=" & HOL_SOURCE_URL & "; rows=" & n
+    MsgBox "祝日の取り込みでエラーが発生しました:" & vbCrLf & Err.Description & vbCrLf & vbCrLf & _
+           "ネットワークに繋がらない場合や、外部データの取得が" & vbCrLf & _
+           "許可されていない場合に起こります。" & vbCrLf & _
+           "その場合は CSV を A/B 列に手で貼り付けてください。", _
+           vbExclamation, SHT_HOLIDAY
+    Resume CleanUp
+End Sub
+
+'--- この Excel で Power Query が使えるか ---
+'    Workbook.Queries は Excel 2016 以降にしかない。参照できるかで判定する。
+'    古い Excel でもコンパイルが通るよう Object 経由で呼ぶ(遅延バインド)。
+Private Function SC_PQ使用可() As Boolean
+    Dim wb As Object, n As Long
+    On Error GoTo ErrHandler
+
+10  Set wb = ThisWorkbook
+20  n = wb.Queries.Count
+30  SC_PQ使用可 = True
+    Exit Function
+ErrHandler:
+    '--- Excel 2013 以前。想定内なので記録だけして False を返す ---
+    LogError MODULE_NAME, "SC_PQ使用可", Err.Number, Err.Description, Erl, _
+             "Power Query unavailable"
+    SC_PQ使用可 = False
+End Function
+
+'--- 取り込みクエリを作る(同名があれば作り直す) ---
+Private Sub SC_祝日クエリを作る()
+    Dim wb As Object
+    On Error GoTo ErrHandler
+
+10  Set wb = ThisWorkbook
+    '--- 同名クエリが無い場合の削除失敗は正常系 ---
+20  On Error Resume Next
+30  wb.Queries(HOL_QUERY_NAME).Delete
+40  On Error GoTo ErrHandler
+50  wb.Queries.Add Name:=HOL_QUERY_NAME, Formula:=SC_祝日M式()
+
+    LogSuccess MODULE_NAME, "SC_祝日クエリを作る", "query=" & HOL_QUERY_NAME
+    Exit Sub
+ErrHandler:
+    LogError MODULE_NAME, "SC_祝日クエリを作る", Err.Number, Err.Description, Erl, _
+             "query=" & HOL_QUERY_NAME
+End Sub
+
+'--- 取り込みクエリの M 式 ---
+'    列名は SC_HolHeads と揃える。見出しを変えたら取り込みも追随する。
+Private Function SC_祝日M式() As String
+    Dim heads As Variant, cDate As String, cName As String
+    On Error GoTo ErrHandler
+
+10  heads = SC_HolHeads()
+20  cDate = CStr(heads(LBound(heads)))
+30  cName = CStr(heads(LBound(heads) + 1))
+
+40  SC_祝日M式 = _
+        "let" & vbLf & _
+        "  Src = Csv.Document(Web.Contents(""" & HOL_SOURCE_URL & """)," & _
+            "[Delimiter="","", Columns=2, Encoding=" & HOL_SOURCE_CP & _
+            ", QuoteStyle=QuoteStyle.None])," & vbLf & _
+        "  Hdr = Table.PromoteHeaders(Src, [PromoteAllScalars=true])," & vbLf & _
+        "  Cols = Table.ColumnNames(Hdr)," & vbLf & _
+        "  Ren = Table.RenameColumns(Hdr, {{Cols{0}, """ & cDate & """}, " & _
+            "{Cols{1}, """ & cName & """}})," & vbLf & _
+        "  Typed = Table.TransformColumnTypes(Ren, {{""" & cDate & """, type date}, " & _
+            "{""" & cName & """, type text}})," & vbLf & _
+        "  Clean = Table.SelectRows(Typed, each [" & cDate & "] <> null)" & vbLf & _
+        "in" & vbLf & _
+        "  Clean"
+    Exit Function
+ErrHandler:
+    LogError MODULE_NAME, "SC_祝日M式", Err.Number, Err.Description, Erl, ""
+    SC_祝日M式 = ""
+End Function
+
+'--- クエリの出力先テーブルを作る(A1 起点) ---
+Private Function SC_祝日テーブルを作る(ByVal ws As Worksheet) As ListObject
+    Dim lo As ListObject, lastR As Long
+    On Error GoTo ErrHandler
+
+    '--- 貼り替え先を空にしておく(見出しはクエリが書く) ---
+10  lastR = ws.Cells(ws.Rows.Count, HOL_COL_DATE).End(xlUp).Row
+20  If lastR >= HOL_HDR_ROW Then
+30      ws.Range(ws.Cells(HOL_HDR_ROW, HOL_COL_DATE), _
+                 ws.Cells(lastR, HOL_COL_NAME)).ClearContents
+40  End If
+
+50  Set lo = ws.ListObjects.Add( _
+                SourceType:=0, _
+                Source:=PQ_CONN_HEAD & HOL_QUERY_NAME & PQ_CONN_TAIL, _
+                Destination:=ws.Cells(HOL_HDR_ROW, HOL_COL_DATE))
+60  lo.Name = HOL_TABLE_NAME
+70  With lo.QueryTable
+        .CommandType = xlCmdSql
+        .CommandText = "SELECT * FROM [" & HOL_QUERY_NAME & "]"
+        .RowNumbers = False
+        .PreserveFormatting = True
+        .RefreshStyle = xlInsertDeleteCells
+        .AdjustColumnWidth = False
+        .BackgroundQuery = False
+80  End With
+90  Set SC_祝日テーブルを作る = lo
+    Exit Function
+ErrHandler:
+    LogError MODULE_NAME, "SC_祝日テーブルを作る", Err.Number, Err.Description, Erl, _
+             "sheet=" & ws.Name & "; lastRow=" & lastR
+    Set SC_祝日テーブルを作る = Nothing
+End Function
+
+'--- 既にある取り込みテーブルを返す(無ければ Nothing) ---
+Private Function SC_祝日テーブル(ByVal ws As Worksheet) As ListObject
+    Dim lo As ListObject
+    On Error GoTo ErrHandler
+
+10  For Each lo In ws.ListObjects
+20      If StrComp(lo.Name, HOL_TABLE_NAME, vbTextCompare) = 0 Then
+30          Set SC_祝日テーブル = lo
+40          Exit Function
+50      End If
+60  Next lo
+    Exit Function
+ErrHandler:
+    LogError MODULE_NAME, "SC_祝日テーブル", Err.Number, Err.Description, Erl, _
+             "sheet=" & ws.Name
+    Set SC_祝日テーブル = Nothing
+End Function
+
+'--- 手で入っている祝日の件数(見出し行を除く) ---
+Private Function SC_祝日データ行数(ByVal ws As Worksheet) As Long
+    Dim lastR As Long
+    On Error GoTo ErrHandler
+
+10  lastR = ws.Cells(ws.Rows.Count, HOL_COL_DATE).End(xlUp).Row
+20  If lastR > HOL_HDR_ROW Then SC_祝日データ行数 = lastR - HOL_HDR_ROW
+    Exit Function
+ErrHandler:
+    LogError MODULE_NAME, "SC_祝日データ行数", Err.Number, Err.Description, Erl, _
+             "sheet=" & ws.Name
+    SC_祝日データ行数 = 0
+End Function
 
 '==================================================================
 ' 3) シフト変更ログ

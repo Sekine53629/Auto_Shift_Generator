@@ -46,9 +46,24 @@
 <tr><th style="width:150px">シート名</th><th>役割</th></tr>
 <tr><td><code>シフト</code></td><td>メイン。日付・氏名・シフト記号・集計行・入力パレット</td></tr>
 <tr><td><code>自動作成設定</code></td><td>メンバーごとの勤務条件（マスタ）と全体ルール</td></tr>
-<tr><td><code>祝日マスタ</code></td><td>国民の祝日一覧（公休ノルマの算出に使用）</td></tr>
+<tr><td><code>祝日マスタ</code></td><td>国民の祝日一覧（公休ノルマの算出に使用）。<strong>内閣府のCSVを Power Query で取り込めます</strong></td></tr>
 <tr><td><code>シフト変更ログ</code></td><td>変更履歴。「シフト変更を戻す」の復元元データ</td></tr>
 </table>
+
+<h3>祝日マスタの取り込み</h3>
+<p><span class="macro">ShiftSchema_祝日マスタ取込</span> を実行すると、内閣府が公開している「国民の祝日」CSV を Power Query で取り込み、<code>祝日マスタ</code> の A/B 列に展開します。<strong>シートが空の状態で <span class="macro">ShiftSetup_初期設定実行</span> を走らせると、取り込むかどうか聞かれます。</strong></p>
+<table>
+<tr><th style="width:150px">項目</th><th>内容</th></tr>
+<tr><td>取得元</td><td><code>https://www8.cao.go.jp/chosei/shukujitsu/syukujitsu.csv</code>（Shift-JIS・2列）</td></tr>
+<tr><td>更新のしかた</td><td>取り込んだ表の中で<strong>右クリック →「更新」</strong>。マクロを実行し直しても更新されます</td></tr>
+<tr><td>必要な環境</td><td><strong>Excel 2016 以降</strong>。2013 以前では使えないため、その旨を表示して従来どおり手貼りの案内をします</td></tr>
+<tr><td>手で貼る場合</td><td>これまでどおり A 列に日付、B 列に名称を貼り付けても動きます。取り込みは<strong>必須ではありません</strong></td></tr>
+</table>
+
+<div class="warn">
+<strong>取り込みはインターネットに接続します。</strong>実行前に必ず確認を求めます。オフライン環境や、外部データの取得が許可されていない環境では失敗します（その場合はメッセージを出して中断するので、手で貼り付けてください）。<br><br>
+<strong>すでに祝日を手で入れてある場合、取り込みに切り替えると置き換わります。</strong>切り替える前に確認を求めますが、置き換えた内容は Ctrl+Z では戻せません。独自の休業日を混ぜている場合はご注意ください。
+</div>
 
 <h3>標準モジュールの構成</h3>
 <p>VBE に取り込む標準モジュールは次の9本です。<strong>すべて入れてください</strong>（依存関係があります）。</p>
@@ -60,7 +75,7 @@
 <tr><td><code>ShiftAutoPlace</code></td><td>v9.3.0</td><td>公休の配置・均等化アルゴリズムと記号割当・書き込み・結果レポート</td></tr>
 <tr><td><code>ShiftAutoLog</code></td><td>v9.3.0</td><td>設定チェック・変更ログ・戻す・白紙化と共通ヘルパー</td></tr>
 <tr><td><code>ShiftClick</code></td><td>v9.4</td><td>クリック入力（パレットのモード切替・スタンプ・連続切替）</td></tr>
-<tr><td><code>ShiftSchema</code></td><td>v1.1</td><td>不足シート（自動作成設定／祝日マスタ／シフト変更ログ）の生成</td></tr>
+<tr><td><code>ShiftSchema</code></td><td>v1.2</td><td>不足シート（自動作成設定／祝日マスタ／シフト変更ログ）の生成</td></tr>
 <tr><td><code>ShiftSetup</code></td><td>v2.8</td><td>シートの初期設定（パレット生成・集計行／集計列の数式・名前付き範囲）</td></tr>
 <tr><td><code>ShiftExport</code></td><td>v1.1</td><td>シフト表を印刷用に切り出して PDF / Excel へ出力</td></tr>
 <tr><td><code>ShiftSurvey</code></td><td>v2.2</td><td>シート構造の調査（読み取り専用）。行構成・数式・名前付き範囲をレポートに書き出します</td></tr>
