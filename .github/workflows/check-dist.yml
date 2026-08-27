@@ -10,10 +10,21 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          # 版の据え置き検査(10)が分岐点との差分を見るため、履歴を全部取る
+          fetch-depth: 0
       - uses: actions/setup-python@v5
         with:
           python-version: '3.x'
-      - name: src/ の静的チェック (コンパイルエラーになる書き方を検出)
-        run: python3 tools/check_vba.py
+      - name: src/ の静的チェック (コンパイルエラーになる書き方と版の据え置きを検出)
+        env:
+          # pull_request のときだけ入る。push のときは空になる
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          if [ -n "$BASE_REF" ]; then
+            python3 tools/check_vba.py --base "origin/$BASE_REF"
+          else
+            python3 tools/check_vba.py
+          fi
       - name: dist/ が src/ と一致しているか確認
         run: python3 tools/build_sjis.py --check

@@ -1,8 +1,9 @@
 Attribute VB_Name = "AutoShiftGenerator"
 Option Explicit
 '==================================================================
-'  ShiftAuto v9.2.0
+'  ShiftAuto v9.3.0
 '  自動作成の入口と前半工程(準備～週リスト)。
+'  v9.3.0: 書き込みの後に AS_休業行の塗り を呼ぶ工程を追加。
 '  v9.2.0: 記号・区分の定数を ShiftCommon へ移管。
 '          モジュール外から呼ばれない AS_* を Private に変更。
 '  ※ ShiftAuto / ShiftAutoPlace / ShiftAutoLog の3本で1組。

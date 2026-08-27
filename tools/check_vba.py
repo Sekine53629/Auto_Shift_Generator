@@ -13,13 +13,19 @@
     7. どこにも定義が無い識別子 ………………… コンパイルエラー
     8. 宣言セクションの外にある宣言 …………… コンパイルエラー
     9. マニュアルの版表記の古さ ………………… 実害なしだが誤解のもと
+   10. 版を上げ忘れたモジュール ……………… どの版が動いているか分からなくなる
 
-    python3 tools/check_vba.py
+    python3 tools/check_vba.py                     (検査1-9)
+    python3 tools/check_vba.py --base origin/main  (検査1-10)
+
+検査10だけは git の履歴を見る。--base を省いた場合は origin/main
+(無ければ main)との分岐点を比較元にし、それも取れなければ検査を飛ばす。
 """
 import io
 import re
 import sys
 import pathlib
+import subprocess
 import collections
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
@@ -36,6 +42,8 @@ SKIP_VERSION = {"ErrorLogger", "Sheet1"}
 # マニュアルの表での表記がモジュール名と違うもの
 MANUAL_LABEL = {"AutoShiftGenerator": "ShiftAuto"}
 VER_RE = re.compile(r"v[0-9]+(?:[.][0-9]+)*")
+# 版を持たないため据え置き検査(10)の対象外とするモジュール
+SKIP_BUMP = {"ErrorLogger"}
 
 PROC = re.compile(r"^\s*(Public|Private)\s+(Sub|Function)\s+([^\s(]+)")
 END = re.compile(r"^\s*End\s+(Sub|Function)\s*$")
@@ -77,7 +85,94 @@ def procedures(lines):
         i = j + 1
 
 
-def check():
+def git(*args):
+    """git の出力を返す。コマンドが失敗したら None。"""
+    try:
+        r = subprocess.run(("git",) + args, cwd=str(ROOT),
+                           stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+    except OSError:
+        return None
+    if r.returncode != 0:
+        return None
+    return r.stdout.decode("utf-8", "replace")
+
+
+def resolve_base(explicit):
+    """検査10の比較元コミットを決める。決められなければ None。
+
+    枝の先端ではなく分岐点(merge-base)と比べる。先端と比べると、
+    自分が触っていないファイルまで差分に見えてしまうため。
+    """
+    for ref in ([explicit] if explicit else ["origin/main", "main"]):
+        sha = git("merge-base", "HEAD", ref)
+        if not sha:
+            continue
+        sha = sha.strip()
+        head = git("rev-parse", "HEAD")
+        if head and head.strip() == sha:
+            # 比較先の枝の上にいる(main への push など)。直前と比べる。
+            prev = git("rev-parse", "--verify", "HEAD~1")
+            return prev.strip() if prev else None
+        return sha
+    return None
+
+
+def code_only(text):
+    """コメント・空行・空白を落として、コードの行だけを返す。
+
+    版を上げてほしいのは動きが変わったときだけなので、コメントの加筆や
+    字下げの手直しでは反応しないようにする。空白は1個に潰すので、
+    行番号の桁が増えて後ろがずれただけの行も同じものとして扱う。
+    """
+    out = []
+    for ln in text.splitlines():
+        t = " ".join(re.sub(r"'.*$", "", ln).split())
+        if t:
+            out.append(t)
+    return out
+
+
+def version_tuple(s):
+    """版の文字列 v9.2.0 を (9, 2, 0) にする。数えられなければ None。"""
+    try:
+        return tuple(int(p) for p in s[1:].split("."))
+    except ValueError:
+        return None
+
+
+def check_bump(sources, base, problems):
+    """10. コードが変わっているのに版が上がっていないモジュールを探す。
+
+    版が据え置きだと、利用者が貼ったモジュールと手元のコードが
+    同じ版を名乗りながら中身が違う、という状態になる。
+    どの版が動いているのか確かめる術が無くなるため機械的に止める。
+    """
+    for mod, text in sorted(sources.items()):
+        if mod in SKIP_BUMP:
+            continue
+        old = git("show", base + ":src/" + mod + ".bas")
+        if old is None:
+            continue                                   # 新規追加のモジュール
+        if code_only(old) == code_only(text):
+            continue                                   # コードは変わっていない
+        now = VER_RE.search(text[:1200])
+        was = VER_RE.search(old[:1200])
+        if not now:
+            problems.append(f"{mod}: 冒頭に版の表記がありません")
+            continue
+        if was:
+            a, b = version_tuple(was.group(0)), version_tuple(now.group(0))
+            if a is None or b is None or b > a:
+                continue
+        else:
+            continue                                   # 比較元に版が無い
+        problems.append(
+            f"{mod}: コードが変わったのに版が上がっていません "
+            f"(比較元 {was.group(0)} / 現在 {now.group(0)})。"
+            f" 冒頭の版と docs/manual.html の版を上げてください")
+
+
+def check(base=None):
     files = sorted(SRC_DIR.glob("*.bas"))
     if not files:
         print("[NG] src/*.bas が見つかりません")
@@ -213,6 +308,17 @@ def check():
             if name not in defined:
                 problems.append(f"{mod}: {name} の定義が見つかりません")
 
+    # 10. 版の据え置き(git の履歴が要るため、取れないときは飛ばす)
+    ref = resolve_base(base)
+    if ref is not None:
+        check_bump(sources, ref, problems)
+    elif base:
+        problems.append(
+            f"比較元 {base} を解決できません。"
+            f" CI では checkout の fetch-depth を 0 にしてください")
+    else:
+        print("   ※ 比較元が取れないため、版の据え置き検査(10)は行いません")
+
     if problems:
         print(f"[NG] {len(problems)} 件の問題があります")
         for p in problems:
@@ -223,5 +329,16 @@ def check():
     return 0
 
 
+def main(argv):
+    base = None
+    if "--base" in argv:
+        i = argv.index("--base")
+        if i + 1 >= len(argv):
+            print("[NG] --base には比較元のコミットを指定してください")
+            return 1
+        base = argv[i + 1]
+    return check(base)
+
+
 if __name__ == "__main__":
-    sys.exit(check())
+    sys.exit(main(sys.argv[1:]))
