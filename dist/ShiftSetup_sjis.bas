@@ -1,7 +1,7 @@
 Attribute VB_Name = "ShiftSetup"
 Option Explicit
 '==================================================================
-'  シフト表 初期設定マクロ ＜標準モジュール ShiftSetup v2.3＞
+'  シフト表 初期設定マクロ ＜標準モジュール ShiftSetup v2.4＞
 '  2026-08-27
 '  ShiftCommon / ShiftSchema / ShiftClick と併用。
 '  シート上の位置はすべて ShiftCommon が解決する。
@@ -15,6 +15,14 @@ Option Explicit
 '      3) 集計行(医師数(診)/薬剤師出勤数/過不足)の数式
 '      4) 集計列(AH:AL)の見出しと数式
 '      5) 名前付き範囲の再定義(動的数式)
+'
+'  v2.4 変更(検証報告 2026-08-27 の指摘に対応):
+'   ・パレットの名前付き範囲を静的アドレスから動的数式に変更
+'     実行のたびに手入力の動的定義を固定値で潰していた
+'     (v2.1 で入力欄だけ直し、パレットが取り残されていた)
+'   ・集計列の見出しを「空欄のときだけ書く」方式に変更
+'     手で短縮した見出し(例 5診)を実行のたびに戻していた
+'   ・SS_パレット装飾 の範囲外ガードを全ループに統一
 '
 '  v2.1 変更:
 '   ・名前付き範囲を静的アドレスではなく動的数式で定義するよう変更
@@ -57,6 +65,9 @@ Private Const HEAD_SHORT As String = "過不足"
 ' 設定シートの「必要出勤数(医師数+n)の n」を探すラベル(前方一致)
 Private Const CFG_KEY_REQ  As String = "必要出勤"
 Private Const REQ_FALLBACK As Long = 1
+
+' パレットの幅を数えるときに見る列数(ラベル行の COUNTA 範囲)
+Private Const PAL_SCAN_COLS As Long = 200
 
 ' 書式
 Private Const CLR_BLACK      As Long = 0
@@ -362,22 +373,32 @@ Private Sub SS_パレット装飾(ByVal pal As Range)
 
 10  fills = SS_FillColors()
 
-    '--- モードセル(OFF/自動/切替/色消)はグレー ---
+    '--- 定数がパレット幅を超えていないか(超えていたら装飾しない) ---
+15  If IDX_NOTE_FIRST > pal.Cells.Count Then
+16      LogError MODULE_NAME, "SS_パレット装飾", 0, _
+                 "パレットの幅が定数より狭いため装飾を中止", Erl, _
+                 "cells=" & pal.Cells.Count & "; needed=" & IDX_NOTE_FIRST
+17      Exit Sub
+18  End If
+
+    '--- モードセル(OFF/自動/戻す/出力/切替/色消)はグレー ---
 20  For i = IDX_OFF To IDX_CLEARFILL
-30      With pal.Cells(1, i)
-            .Interior.Color = ClrModeBg()
-            .Font.Color = ClrModeFg()
-40      End With
+30      If i <= pal.Cells.Count Then
+            With pal.Cells(1, i)
+                .Interior.Color = ClrModeBg()
+                .Font.Color = ClrModeFg()
+            End With
+40      End If
 50  Next i
 
     '--- 背景色ボタン: 値は持たず背景色のみ ---
 60  For i = IDX_FILL_FIRST To IDX_FILL_LAST
-70      pal.Cells(1, i).Interior.Color = fills(i - IDX_FILL_FIRST)
+70      If i <= pal.Cells.Count Then pal.Cells(1, i).Interior.Color = fills(i - IDX_FILL_FIRST)
 80  Next i
 
     '--- ○●▲ を少し大きく ---
 90  For i = IDX_SYM_FIRST To IDX_SYM_LAST
-100     pal.Cells(1, i).Font.size = FS_SYMBOL
+100     If i <= pal.Cells.Count Then pal.Cells(1, i).Font.size = FS_SYMBOL
 110 Next i
 
     '--- 医師名スタンプは色分けして区別 ---
@@ -641,10 +662,10 @@ Public Sub ShiftSetup_集計列数式()
 120 Application.EnableEvents = False
 130 Application.ScreenUpdating = False
 
-    '--- 見出し行 ---
+    '--- 見出し行(空欄のときだけ書く。手で短縮した見出しを戻さない) ---
 140 For i = 0 To UBound(heads)
 150     With ws.Cells(hdrRow, aggCol + i)
-            .Value = heads(i)
+            If Len(Trim$(CStr(.Value))) = 0 Then .Value = heads(i)
             .Font.Bold = True
             .Font.size = FS_LABEL
             .HorizontalAlignment = xlCenter
@@ -729,7 +750,7 @@ End Function
 '====================== 5) 名前付き範囲 ==========================
 Public Sub ShiftSetup_名前付き範囲更新()
     Dim ws As Worksheet, topR As Long, botR As Long
-    Dim palRow As Long, nPal As Long, addr As String, lastCol As String
+    Dim palRow As Long, addr As String
     On Error GoTo ErrHandler
 
 10  Set ws = ShiftSheet()
@@ -748,22 +769,22 @@ Public Sub ShiftSetup_名前付き範囲更新()
 90  addr = SS_GridFormula(ws, topR)
 100 SS_ReplaceName NM_SHIFT, addr
 
-    '--- 医師名リスト範囲(固定行) ---
+    '--- 医師名リスト範囲(静的) ---
+    '    医師名欄は日付行からの相対位置で決まるが、日付行は
+    '    「B列で最初に見つかる数式かつ日付のセル」であり、
+    '    ワークシート数式では表せない。そのため実アドレスで固定する。
+    '    行構成を変えたら、この初期設定を実行し直して貼り替えること。
 102 SS_ReplaceName NM_DOCLIST, SS_BlockFormula(ws, DoctorBlock(ws))
 
     '--- 備考行範囲(動的: 1行固定) ---
 104 SS_ReplaceName NM_NOTEROW, SS_NoteFormula(ws)
 
-    '--- パレット本体 ---
-110 nPal = UBound(SS_PalVals(ws)) + 1
-120 lastCol = ColLetter(ws.Range(COL_FIRST & "1").Column + nPal - 1)
-130 addr = "=" & ws.Name & "!$" & COL_FIRST & "$" & palRow & _
-           ":$" & lastCol & "$" & palRow
-140 SS_ReplaceName NM_PALETTE, addr
+    '--- パレット本体(動的: A列の見出しを追い、幅はラベル行から数える) ---
+110 SS_ReplaceName NM_PALETTE, SS_PaletteFormula(ws)
 
     LogSuccess MODULE_NAME, "ShiftSetup_名前付き範囲更新", _
                "shift=" & COL_FIRST & topR & ":" & COL_LAST & botR & "(dynamic)" & _
-               ", palette=" & COL_FIRST & palRow & ":" & lastCol & palRow
+               ", paletteRow=" & palRow & "(dynamic)"
     Exit Sub
 
 ErrHandler:
@@ -793,6 +814,29 @@ ErrHandler:
     LogError MODULE_NAME, "SS_GridFormula", Err.Number, Err.Description, Erl, _
              "topRow=" & topR & "; nCol=" & nCol
     SS_GridFormula = ""
+End Function
+
+'--- パレット本体(1行)の動的数式を組み立てる ---
+'    行  = A列の「シフトパレット」見出しの行(パレット本体行と同じ行)
+'    幅  = ラベル行の入力済みセル数
+'          本体行は背景色ボタンなどが空なので数えられない。
+'          ラベル行は必ず埋まるため、こちらを幅の基準にする。
+'          (ShiftCommon.PaletteRange のフォールバックと同じ考え方)
+Private Function SS_PaletteFormula(ByVal ws As Worksheet) As String
+    Dim q As String, m As String, colOff As Long
+    On Error GoTo ErrHandler
+
+10  q = SS_Q(ws.Name)
+20  colOff = ws.Range(COL_FIRST & "1").Column - 1
+30  m = "MATCH(""" & LBL_PALETTE & "*""," & q & "!$A:$A,0)-1"
+40  SS_PaletteFormula = "=OFFSET(" & q & "!$A$1," & m & "," & colOff & ",1," & _
+                        "COUNTA(OFFSET(" & q & "!$A$1," & m & "+" & LABEL_OFFSET & _
+                        "," & colOff & ",1," & PAL_SCAN_COLS & ")))"
+    Exit Function
+ErrHandler:
+    LogError MODULE_NAME, "SS_PaletteFormula", Err.Number, Err.Description, Erl, _
+             "colOffset=" & colOff
+    SS_PaletteFormula = ""
 End Function
 
 '--- 備考行(1行)の動的数式を組み立てる ---

@@ -475,7 +475,7 @@ Private Function AS_Šù‘¶•ª—Ş() As Boolean
 70               v = Trim$(CStr(mGrid.Cells(i, j).Value))
 80               If Len(v) = 0 Then
 90                   mPlan(i, j) = 0
-100              ElseIf InStr("›üœ£", v) > 0 Then
+100              ElseIf InStr(SYM_EARLY & SYM_EARLY_ALT & SYM_MID & SYM_LATE, v) > 0 Then
 110                  mPlan(i, j) = ST_FWORK
 120              Else
 130                  mPlan(i, j) = ST_FOFF          ' Šó‹xE—L‹xEŒö‹x‚È‚Ç

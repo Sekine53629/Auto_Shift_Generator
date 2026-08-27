@@ -474,7 +474,7 @@ Private Function AS_既存分類() As Boolean
 70               v = Trim$(CStr(mGrid.Cells(i, j).Value))
 80               If Len(v) = 0 Then
 90                   mPlan(i, j) = 0
-100              ElseIf InStr("○◯●▲", v) > 0 Then
+100              ElseIf InStr(SYM_EARLY & SYM_EARLY_ALT & SYM_MID & SYM_LATE, v) > 0 Then
 110                  mPlan(i, j) = ST_FWORK
 120              Else
 130                  mPlan(i, j) = ST_FOFF          ' 希休・有休・公休など
