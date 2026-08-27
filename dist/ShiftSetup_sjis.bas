@@ -83,8 +83,9 @@ Private Const FS_TITLE  As Long = 14
 
 Private Function SS_PalValsBase() As Variant
     On Error GoTo ErrHandler
-    '  ˆãt–¼‚Ìè‘O‚Ü‚Å(1..16)
-    SS_PalValsBase = Array("OFF", "©“®", "Ø‘Ö", "FÁ", _
+    '  ˆãt–¼‚Ìè‘O‚Ü‚Å(1..18)
+    '  ‹ó•¶š‚Íu’l‚ğ‚½‚È‚¢ƒ{ƒ^ƒ“v(”wŒiFƒyƒCƒ“ƒg3‚Â‚ÆÁ‹)
+    SS_PalValsBase = Array("OFF", "©“®", "–ß‚·", "o—Í", "Ø‘Ö", "FÁ", _
                            "", "", "", "", _
                            "›", "œ", "£", _
                            "Œö‹x", "Šó‹x", "‰Ä‹x", "—L‹x", "—L‹x¦")
@@ -95,7 +96,7 @@ End Function
 
 Private Function SS_PalLabsBase() As Variant
     On Error GoTo ErrHandler
-    SS_PalLabsBase = Array("’â~", "©“®", "‡‘—‚è", "”wŒiÁ", _
+    SS_PalLabsBase = Array("’â~", "©“®", "Œ³‚É–ß‚·", "ˆóüo—Í", "‡‘—‚è", "”wŒiÁ", _
                            "”wŒi—Î", "”wŒiò", "”wŒiŠD", "Á‹", _
                            "‘”Ô", "’x”¼", "’x”Ô", _
                            "Œö‹x", "Šó‹x", "‰Ä‹x", "—L‹x", "”õl•t")

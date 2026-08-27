@@ -82,8 +82,9 @@ Private Const FS_TITLE  As Long = 14
 
 Private Function SS_PalValsBase() As Variant
     On Error GoTo ErrHandler
-    '  医師名の手前まで(1..16)
-    SS_PalValsBase = Array("OFF", "自動", "切替", "色消", _
+    '  医師名の手前まで(1..18)
+    '  空文字は「値を持たないボタン」(背景色ペイント3つと消去)
+    SS_PalValsBase = Array("OFF", "自動", "戻す", "出力", "切替", "色消", _
                            "", "", "", "", _
                            "○", "●", "▲", _
                            "公休", "希休", "夏休", "有休", "有休※")
@@ -94,7 +95,7 @@ End Function
 
 Private Function SS_PalLabsBase() As Variant
     On Error GoTo ErrHandler
-    SS_PalLabsBase = Array("停止", "自動", "順送り", "背景消", _
+    SS_PalLabsBase = Array("停止", "自動", "元に戻す", "印刷出力", "順送り", "背景消", _
                            "背景緑", "背景橙", "背景灰", "消去", _
                            "早番", "遅半", "遅番", _
                            "公休", "希休", "夏休", "有休", "備考付")

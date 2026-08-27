@@ -109,11 +109,11 @@ Public Sub ShiftClick_Handle(ByVal Target As Range, _
 60      If EventKind = "right" Then Exit Sub
 70      palIdx = PaletteIndexOf(ws, Target.Cells(1, 1))
 
-        '--- 「自動」はダブルクリックのみで AutoShift を起動 ---
-80      If palIdx = IDX_AUTO Then
+        '--- 動作ボタン(自動/戻す/出力)はダブルクリックで即実行 ---
+80      If IsActionButton(palIdx) Then
 90          If EventKind = "double" Then
 100             Handled = True
-110             RunAutoShift ws
+110             RunAction ws, palIdx
 120         End If
 130         Exit Sub
 140     End If
@@ -130,8 +130,8 @@ Public Sub ShiftClick_Handle(ByVal Target As Range, _
 
 240 idx = CurrentIndex(ws)
 250 If idx = IDX_OFF Then Exit Sub
-    '--- 「自動」がモードとして残っていても入力欄では何もしない ---
-260 If idx = IDX_AUTO Then Exit Sub
+    '--- 動作ボタンがモードとして残っていても入力欄では何もしない ---
+260 If IsActionButton(idx) Then Exit Sub
     '--- 記号の種類と書き込み先が噛み合わない組み合わせは無視する ---
 265 If Not StampAllowedHere(idx, kind) Then Exit Sub
 
@@ -195,6 +195,25 @@ ErrHandler:
              "cell=" & c.Address(False, False)
     PaletteIndexOf = 0
 End Function
+
+'--- 動作ボタンを実行する ---
+Private Sub RunAction(ByVal ws As Worksheet, ByVal palIdx As Long)
+    On Error GoTo ErrHandler
+
+        Select Case palIdx
+            Case IDX_AUTO
+                RunAutoShift ws
+            Case IDX_UNDO
+                Application.Run UNDO_MACRO
+            Case IDX_EXPORT
+                Application.Run EXPORT_MACRO
+        End Select
+    Exit Sub
+ErrHandler:
+    LogError MODULE_NAME, "RunAction", Err.Number, Err.Description, Erl, _
+             "palIdx=" & palIdx
+    MsgBox "実行できませんでした: " & Err.Description, vbExclamation
+End Sub
 
 '--- AutoShift を起動する ---
 '    Application.Run で呼ぶため、AutoShift が未実装でもコンパイルは通る。
@@ -561,6 +580,12 @@ Private Sub ShowMode(ByVal ws As Worksheet, ByVal idx As Long)
 
             Case IDX_AUTO
                 s = "シフト入力マクロ: 自動作成　ダブルクリックで実行"
+
+            Case IDX_UNDO
+                s = "シフト入力マクロ: 元に戻す　ダブルクリックで直前の変更を取り消す"
+
+            Case IDX_EXPORT
+                s = "シフト入力マクロ: 印刷出力　ダブルクリックで PDF / Excel に書き出す"
 
             Case IDX_CYCLE
                 If LCase$(CYCLE_TRIGGER) = "single" Then op = "クリック" Else op = "ダブルクリック"

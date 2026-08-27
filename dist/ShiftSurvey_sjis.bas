@@ -311,6 +311,8 @@ Private Function SV_WritePalette(ByVal rpt As Worksheet, ByVal ws As Worksheet, 
 160 r = SV_Row(rpt, r, Array("", "IDX_ERASE", IDX_ERASE))
 170 r = SV_Row(rpt, r, Array("", "IDX_SYM_FIRST", IDX_SYM_FIRST))
 180 r = SV_Row(rpt, r, Array("", "IDX_SYM_LAST", IDX_SYM_LAST))
+185 r = SV_Row(rpt, r, Array("", "IDX_UNDO", IDX_UNDO))
+186 r = SV_Row(rpt, r, Array("", "IDX_EXPORT", IDX_EXPORT))
 190 r = SV_Row(rpt, r, Array("", "IDX_DOC_FIRST", IDX_DOC_FIRST))
 195 r = SV_Row(rpt, r, Array("", "IDX_DOC_LAST", IDX_DOC_LAST, "医師名の最終位置"))
 196 r = SV_Row(rpt, r, Array("", "IDX_NOTE_FIRST", IDX_NOTE_FIRST, "ここから先は備考スタンプ"))
@@ -351,6 +353,8 @@ Private Function SV_PaletteRole(ByVal idx As Long) As String
         Select Case idx
             Case IDX_OFF:       SV_PaletteRole = "OFF"
             Case IDX_AUTO:      SV_PaletteRole = "自動(AutoShift)"
+            Case IDX_UNDO:      SV_PaletteRole = "戻す(変更の取消)"
+            Case IDX_EXPORT:    SV_PaletteRole = "出力(PDF/Excel)"
             Case IDX_CYCLE:     SV_PaletteRole = "連続切替"
             Case IDX_CLEARFILL: SV_PaletteRole = "背景色クリア"
             Case IDX_FILL_FIRST To IDX_FILL_LAST

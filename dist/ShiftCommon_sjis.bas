@@ -124,19 +124,26 @@ Private Const MAX_SCAN_ROWS As Long = 200
 '==================================================================
 Public Const IDX_OFF        As Long = 1   ' OFF(マクロ停止)
 Public Const IDX_AUTO       As Long = 2   ' 自動(AutoShift 起動)
-Public Const IDX_CYCLE      As Long = 3   ' 連続切替
-Public Const IDX_CLEARFILL  As Long = 4   ' 背景色クリア
-Public Const IDX_FILL_FIRST As Long = 5   ' 背景色ペイントの先頭(背景緑)
-Public Const IDX_FILL_LAST  As Long = 7   ' 背景色ペイントの最終(背景灰)
-Public Const IDX_ERASE      As Long = 8   ' 消去(空白スタンプ)。記号はこの次から
-Public Const IDX_SYM_FIRST  As Long = 9   ' ○ の位置
-Public Const IDX_SYM_LAST   As Long = 11  ' ▲ の位置
-Public Const IDX_DOC_FIRST  As Long = 17  ' 医師名スタンプの開始位置
+Public Const IDX_UNDO       As Long = 3   ' 戻す(直前のセッションを取り消す)
+Public Const IDX_EXPORT     As Long = 4   ' 出力(印刷用に PDF / Excel へ)
+Public Const IDX_CYCLE      As Long = 5   ' 連続切替
+Public Const IDX_CLEARFILL  As Long = 6   ' 背景色クリア
+Public Const IDX_FILL_FIRST As Long = 7   ' 背景色ペイントの先頭(背景緑)
+Public Const IDX_FILL_LAST  As Long = 9   ' 背景色ペイントの最終(背景灰)
+Public Const IDX_ERASE      As Long = 10  ' 消去(空白スタンプ)。記号はこの次から
+Public Const IDX_SYM_FIRST  As Long = 11  ' ○ の位置
+Public Const IDX_SYM_LAST   As Long = 13  ' ▲ の位置
+Public Const IDX_DOC_FIRST  As Long = 19  ' 医師名スタンプの開始位置
 Public Const DOC_SLOTS      As Long = 9   ' 医師名スタンプの数
 ' 医師名スタンプの最終位置。これより後ろ(銀行など)は医師名ではない
 Public Const IDX_DOC_LAST   As Long = IDX_DOC_FIRST + DOC_SLOTS - 1
 ' 備考スタンプの開始位置。医師名の次からパレット末尾までが備考用
 Public Const IDX_NOTE_FIRST As Long = IDX_DOC_LAST + 1
+
+'--- 動作ボタン(モードにならず、ダブルクリックで即実行する) ---
+'    自動 / 戻す / 出力 の3つ。IDX_AUTO..IDX_EXPORT が連続していること。
+Public Const IDX_ACTION_FIRST As Long = IDX_AUTO
+Public Const IDX_ACTION_LAST  As Long = IDX_EXPORT
 
 '--- 書き込み先の種別(クリック入力の判定に使う) ---
 Public Const TGT_NONE  As Long = 0   ' 書き込めない場所
@@ -162,6 +169,10 @@ Public Const KIND_CL As String = "事務員"
 '  ShiftAuto v8.0.0 の入口プロシージャ名。
 '  実体は Public Sub シフト自動作成() なので日本語名を指定する。
 Public Const AUTOSHIFT_MACRO As String = "シフト自動作成"
+
+'--- 動作ボタンから Application.Run で呼ぶマクロ名 ---
+Public Const UNDO_MACRO   As String = "シフト変更を戻す"
+Public Const EXPORT_MACRO As String = "ShiftExport_シフト表出力"
 
 '--- 整合性チェックのマクロ名(自動実行前の確認用) ---
 Public Const AUTOCHECK_MACRO As String = "シフト設定チェック"
@@ -257,6 +268,19 @@ ErrHandler:
     LogError MODULE_NAME, "IsDoctorStamp", Err.Number, Err.Description, Erl, _
              "idx=" & idx
     IsDoctorStamp = False
+End Function
+
+'--- そのパレット番号が動作ボタン(自動/戻す/出力)か ---
+'    モードとして選択されず、ダブルクリックでその場で実行する。
+Public Function IsActionButton(ByVal idx As Long) As Boolean
+    On Error GoTo ErrHandler
+
+10  IsActionButton = (idx >= IDX_ACTION_FIRST And idx <= IDX_ACTION_LAST)
+    Exit Function
+ErrHandler:
+    LogError MODULE_NAME, "IsActionButton", Err.Number, Err.Description, Erl, _
+             "idx=" & idx
+    IsActionButton = False
 End Function
 
 '--- そのパレット番号が備考スタンプか ---
@@ -608,6 +632,26 @@ ErrHandler:
     LogError MODULE_NAME, "PaletteRange", Err.Number, Err.Description, Erl, _
              "sheet=" & ws.Name & "; paletteRow=" & palRow
     Set PaletteRange = Nothing
+End Function
+
+'--- 過不足行(表の最終行。出力範囲の下端に使う) ---
+Public Function ShortageRow(ByVal ws As Worksheet) As Long
+    Dim r As Long
+    On Error GoTo ErrHandler
+
+10  r = LabelRow(ws, LBL_SHORT)
+20  If r > 0 Then
+30      ShortageRow = r
+40  Else
+        ' ラベルが無い場合は 医師数行 + 2 (医師数 / 薬剤師出勤数 / 過不足)
+50      r = ShiftDocRow(ws)
+60      If r > 0 Then ShortageRow = r + 2
+70  End If
+    Exit Function
+ErrHandler:
+    LogError MODULE_NAME, "ShortageRow", Err.Number, Err.Description, Erl, _
+             "sheet=" & ws.Name
+    ShortageRow = 0
 End Function
 
 '--- 備考行 ---
