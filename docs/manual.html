@@ -34,7 +34,7 @@
 <body>
 
 <h1>くるむ薬局札幌店　シフト表 操作マニュアル</h1>
-<p class="sub">対象ファイル: くるむ薬局_シフト_自動集計版.xlsm　/　ShiftAuto v8.0.0・ShiftClick v9.0・ShiftSetup v1.2・ShiftCommon v1.1　/　2026-08-26</p>
+<p class="sub">対象ファイル: くるむ薬局_シフト_自動集計版.xlsm　/　ShiftCommon v2.7・ShiftAuto v9.2.0・ShiftClick v9.3・ShiftSetup v2.4　/　2026-08-27</p>
 
 <div class="info">
 <strong>このシステムでできること</strong><br>
@@ -46,20 +46,39 @@
 <tr><th style="width:150px">シート名</th><th>役割</th></tr>
 <tr><td><code>シフト</code></td><td>メイン。日付・氏名・シフト記号・集計行・入力パレット</td></tr>
 <tr><td><code>自動作成設定</code></td><td>メンバーごとの勤務条件（マスタ）と全体ルール</td></tr>
-<tr><td><code>祝日マスタ</code></td><td>国民の祝日一覧（公休ノルマの算出に使用）</td></tr>
+<tr><td><code>祝日マスタ</code></td><td>国民の祝日一覧（公休ノルマの算出に使用）。<strong>内閣府のCSVを Power Query で取り込めます</strong></td></tr>
 <tr><td><code>シフト変更ログ</code></td><td>変更履歴。「シフト変更を戻す」の復元元データ</td></tr>
 </table>
 
-<h3>標準モジュールの構成</h3>
-<p>VBE に取り込む標準モジュールは次の6本です。<strong>すべて入れてください</strong>（依存関係があります）。</p>
+<h3>祝日マスタの取り込み</h3>
+<p><span class="macro">ShiftSchema_祝日マスタ取込</span> を実行すると、内閣府が公開している「国民の祝日」CSV を Power Query で取り込み、<code>祝日マスタ</code> の A/B 列に展開します。<strong>シートが空の状態で <span class="macro">ShiftSetup_初期設定実行</span> を走らせると、取り込むかどうか聞かれます。</strong></p>
 <table>
-<tr><th style="width:170px">モジュール</th><th>役割</th></tr>
-<tr><td><code>ShiftCommon</code></td><td><strong>共通土台。</strong>シート名・A列ラベル・列・行オフセット・範囲解決を一元管理。他の3本はここを参照します</td></tr>
-<tr><td><code>ErrorLogger</code></td><td>エラー／成功ログの出力（<code>C:\VBAErrorLogs\</code> にCSV）</td></tr>
-<tr><td><code>ShiftAuto</code><br>(AutoShiftGenerator)</td><td>シフト自動作成・変更ログ・戻す・白紙化・設定チェック</td></tr>
-<tr><td><code>ShiftClick</code></td><td>クリック入力（パレットのモード切替・スタンプ・連続切替）</td></tr>
-<tr><td><code>ShiftSetup</code></td><td>シートの初期設定（パレット生成・集計行／集計列の数式・名前付き範囲）</td></tr>
-<tr><td><code>ShiftSurvey</code></td><td>シート構造の調査（読み取り専用）。行構成・数式・名前付き範囲をレポートに書き出します</td></tr>
+<tr><th style="width:150px">項目</th><th>内容</th></tr>
+<tr><td>取得元</td><td><code>https://www8.cao.go.jp/chosei/shukujitsu/syukujitsu.csv</code>（Shift-JIS・2列）</td></tr>
+<tr><td>更新のしかた</td><td>取り込んだ表の中で<strong>右クリック →「更新」</strong>。マクロを実行し直しても更新されます</td></tr>
+<tr><td>必要な環境</td><td><strong>Excel 2016 以降</strong>。2013 以前では使えないため、その旨を表示して従来どおり手貼りの案内をします</td></tr>
+<tr><td>手で貼る場合</td><td>これまでどおり A 列に日付、B 列に名称を貼り付けても動きます。取り込みは<strong>必須ではありません</strong></td></tr>
+</table>
+
+<div class="warn">
+<strong>取り込みはインターネットに接続します。</strong>実行前に必ず確認を求めます。オフライン環境や、外部データの取得が許可されていない環境では失敗します（その場合はメッセージを出して中断するので、手で貼り付けてください）。<br><br>
+<strong>すでに祝日を手で入れてある場合、取り込みに切り替えると置き換わります。</strong>切り替える前に確認を求めますが、置き換えた内容は Ctrl+Z では戻せません。独自の休業日を混ぜている場合はご注意ください。
+</div>
+
+<h3>標準モジュールの構成</h3>
+<p>VBE に取り込む標準モジュールは次の9本です。<strong>すべて入れてください</strong>（依存関係があります）。</p>
+<table>
+<tr><th style="width:170px">モジュール</th><th style="width:70px">版</th><th>役割</th></tr>
+<tr><td><code>ShiftCommon</code></td><td>v3.0</td><td><strong>共通土台。</strong>シート名・A列ラベル・列・行オフセット・シフト記号・区分・範囲解決を一元管理。他のすべてがここを参照します</td></tr>
+<tr><td><code>ErrorLogger</code></td><td>―</td><td>エラー／成功ログの出力（<code>C:\VBAErrorLogs\</code> にCSV）</td></tr>
+<tr><td><code>ShiftAuto</code><br>(AutoShiftGenerator)</td><td>v9.7.0</td><td>シフト自動作成の入口と前半工程（準備・メンバー読込・週リスト）</td></tr>
+<tr><td><code>ShiftAutoPlace</code></td><td>v9.8.0</td><td>公休の配置・均等化アルゴリズムと記号割当・書き込み・結果レポート</td></tr>
+<tr><td><code>ShiftAutoLog</code></td><td>v9.5.0</td><td>設定チェック・変更ログ・戻す・白紙化と共通ヘルパー</td></tr>
+<tr><td><code>ShiftClick</code></td><td>v9.4</td><td>クリック入力（パレットのモード切替・スタンプ・連続切替）</td></tr>
+<tr><td><code>ShiftSchema</code></td><td>v1.5</td><td>不足シート（自動作成設定／祝日マスタ／シフト変更ログ）の生成</td></tr>
+<tr><td><code>ShiftSetup</code></td><td>v2.9</td><td>シートの初期設定（パレット生成・集計行／集計列の数式・名前付き範囲）</td></tr>
+<tr><td><code>ShiftExport</code></td><td>v1.1</td><td>シフト表を印刷用に切り出して PDF / Excel へ出力</td></tr>
+<tr><td><code>ShiftSurvey</code></td><td>v2.2</td><td>シート構造の調査（読み取り専用）。行構成・数式・名前付き範囲をレポートに書き出します</td></tr>
 </table>
 <p>加えて、シフトシートの<strong>シートモジュール</strong>に <code>Sheet1.bas</code> の内容を貼り付けます。</p>
 
@@ -93,11 +112,27 @@
 ・<strong>入力欄の下端</strong> = <code>医師数(診)</code> の2行上（＝<code>備考</code> 行）<br>
 ・<strong>集計行</strong> = <code>備考</code> 行の2行下から3行<br>
 ・<strong>医師名欄</strong> = A列 <code>医師名</code> の行 〜 ★マーカー行の1行上<br><br>
-実際に何行目になったかは <span class="macro">ShiftSetup_初期設定実行</span> の完了ダイアログと <span class="macro">ShiftClick_セルフチェック</span> で確認できます。
+実際に何行目になったかは <span class="macro">ShiftSetup_初期設定実行</span> の完了ダイアログと <span class="macro">ShiftClick_セルフチェック</span> で確認できます。<br><br>
+<strong>パレット用の3行は自動で用意されます（v2.8）。</strong>日付行の上には ★マーカー／本体／ラベル／年月 の<strong>4行</strong>が必要です。足りない場合、または3行がすでに何かで埋まっている場合は、<span class="macro">ShiftSetup_パレット生成</span> が<strong>行を挿入して場所を作ります</strong>。日付行を含む以下の内容はそのまま下へずれるので、書いたものが消えることはありません。<br>
+すでにパレットがある場合は挿入しません（実行するたびに行が増えないよう、本体行の先頭が <code>OFF</code> かどうかで判定しています）。
 </div>
 
 <div class="info">
 <strong>医師名欄の決まり方</strong>　★マーカー行の直上5行を医師名欄とみなします。A列に <code>医師名</code> と入っている行があれば、そちらを上端として優先します（<strong>任意</strong>。入れなくても動きます）。行数を変えたい場合は <code>ShiftCommon</code> の <code>DOC_BLOCK_ROWS</code> を変更してください。
+</div>
+
+<h3>名前付き範囲は4つ</h3>
+<p>どれも <span class="macro">ShiftSetup_名前付き範囲更新</span> が作ります。名前が無くてもマクロは位置を計算して動きますが、あったほうが速く確実です。</p>
+<table>
+<tr><th style="width:170px">名前</th><th style="width:150px">中身</th><th>使われ方</th></tr>
+<tr><td><code>シフト入力範囲</code></td><td>スタッフの行 × 日付の列<br>（B14:AF27 など）</td><td><strong>スタンプの貼り付け先。</strong>自動作成が書き込む範囲でもあります</td></tr>
+<tr><td><code>シフトパレット</code></td><td>パレット本体の横1行<br>（B2:AD2 など）</td><td>ボタンが並ぶ行。押したボタンの位置を数えるのに使います</td></tr>
+<tr><td><code>医師名リスト範囲</code></td><td>医師名を書く欄</td><td><strong>マクロは読みません。</strong>名前ボックスから飛ぶための目印です。行を増減すると位置が古くなるので、貼り直してください（マクロ側は毎回計算するのでずれません）</td></tr>
+<tr><td><code>備考行範囲</code></td><td>備考の1行</td><td>備考スタンプの貼り付け先</td></tr>
+</table>
+
+<div class="warn">
+<strong>「シフトパレット範囲」という名前は廃止しました（v2.8）。</strong>名前は「パレット」なのに中身は入力欄で、パレット本体の <code>シフトパレット</code> と1文字違いで並ぶため取り違えの原因になっていました。<code>シフト入力範囲</code> に改名しています。<strong>モジュールを貼り替えたあと <span class="macro">ShiftSetup_名前付き範囲更新</span> を1回実行してください。</strong>新しい名前が作られ、古い名前は自動で削除されます。実行するまでは名前が無い状態として扱われ、マクロは位置を計算して動きます（動作に支障はありません）。
 </div>
 
 <div class="warn">
@@ -110,6 +145,9 @@
 <table>
 <tr><th style="width:80px">セル</th><th style="width:110px">ラベル</th><th>動作</th></tr>
 <tr><td class="c">OFF</td><td>停止</td><td>マクロを止め、通常のExcel操作に戻す</td></tr>
+<tr><td class="c">自動</td><td>自動</td><td>ダブルクリックでシフト自動作成を実行</td></tr>
+<tr><td class="c">戻す</td><td>元に戻す</td><td>ダブルクリックで直前の変更を取り消す（<span class="macro">シフト変更を戻す</span> と同じ）</td></tr>
+<tr><td class="c">出力</td><td>印刷出力</td><td>ダブルクリックで印刷用の PDF / Excel を書き出す</td></tr>
 <tr><td class="c">切替</td><td>順送り</td><td>ダブルクリックで記号を順送り／右クリックで逆送り</td></tr>
 <tr><td class="c">色消</td><td>背景消</td><td>ダブルクリックしたセルの背景色を消す</td></tr>
 <tr><td class="c">（空白）</td><td>消去</td><td>ダブルクリックしたセルを空白にする</td></tr>
@@ -125,6 +163,9 @@
 </table>
 
 <p><strong>選択中のモードは★マーカー</strong>（パレット本体の1行上）と、Excel下部のステータスバーに表示されます。</p>
+<div class="info">
+<strong>医師名スタンプの押せる場所</strong>　パレットの<strong>医師名だけ</strong>（3行目のラベルが <code>医師</code> で始まるもの。既定で10個）は、<strong>医師名欄（日付行の2行下から5行）にだけ</strong>押せます。シフト入力欄には押せません。逆に医師名欄には <span class="sym">○</span> <span class="sym">●</span> <span class="sym">▲</span> や公休は押せず、<strong>消去</strong>と<strong>色消</strong>だけ受け付けます。医師名欄に出勤記号が混ざると <code>医師数(診)</code> のカウントがずれるためです。<br><br><strong>医師名より後ろにある <code>銀行</code> は医師名ではありません。</strong>これは<strong>備考欄</strong>で使うスタンプです。<br><br>スタンプは<strong>種類ごとに押せる場所が決まっています</strong>。別の場所に混ざると集計がずれるため、双方向で弾いています。<table style="margin-top:10px"><tr><th style="width:150px">場所</th><th>押せるスタンプ</th></tr><tr><td>シフト入力欄<br>（スタッフの行）</td><td>シフト記号（<span class="sym">○</span> <span class="sym">●</span> <span class="sym">▲</span> 公休 希休 夏休 有休 有休※）</td></tr><tr><td>備考行<br>（<code>医師数(診)</code> の2行上）</td><td><strong>備考スタンプのみ</strong>（<code>銀行</code> など、パレットで医師名より後ろにあるもの）</td></tr><tr><td>医師名欄<br>（日付行の2行下から5行）</td><td><strong>医師名スタンプのみ</strong></td></tr></table><code>消去</code> と <code>色消</code> はどこでも使えます（書き間違いを直せなくなるため）。<code>切替</code>（順送り）はシフト入力欄でのみ働き、シフト記号だけを巡回します。実際の行番号は <span class="macro">ShiftClick_セルフチェック</span> で確認できます。
+</div>
 
 <h3>パレットの操作マクロ</h3>
 <table>
@@ -137,7 +178,7 @@
 </table>
 
 <div class="warn">
-<strong>記号を追加したら</strong> パレットのセルに文字色・背景色を付けておくと、スタンプ時にその書式もコピーされます。色分けしたい記号は先に着色してください。
+<strong>記号を追加したら</strong> パレットのセルに文字色や背景色を付けておいても、<strong>その色はシフト表には移りません</strong>（v9.4 から）。パレットの色は「どのボタンか」を見分けるための飾りで、シフト表側の見た目ではないためです。移るのは<strong>値と太字だけ</strong>です。シフト表のセルを塗りたいときは<strong>背景緑／橙／灰</strong>のボタンを使ってください。
 </div>
 
 <h2>2-2. シートの初期設定（ShiftSetup）</h2>
@@ -145,11 +186,11 @@
 <table>
 <tr><th style="width:250px">マクロ名</th><th>やること</th></tr>
 <tr><td><span class="macro">ShiftSetup_初期設定実行</span></td><td><strong>これ1本でOK。</strong>下の4つをまとめて実行し、結果をダイアログで報告します</td></tr>
-<tr><td><span class="macro">ShiftSetup_パレット生成</span></td><td>日付行の直上3行にパレットを作る</td></tr>
+<tr><td><span class="macro">ShiftSetup_パレット生成</span></td><td>日付行の直上3行にパレットを作る。<strong>3行が無ければ自動で挿入します</strong></td></tr>
 <tr><td><span class="macro">ShiftSetup_ヘッダ数式</span></td><td>年月セルと祝日サマリーの数式をセット</td></tr>
 <tr><td><span class="macro">ShiftSetup_集計行数式</span></td><td><code>医師数(診)</code> / <code>薬剤師出勤数</code> / <code>過不足</code> の数式をセット</td></tr>
 <tr><td><span class="macro">ShiftSetup_集計列数式</span></td><td>AH〜AL列の個人別集計をセット</td></tr>
-<tr><td><span class="macro">ShiftSetup_名前付き範囲更新</span></td><td>「シフトパレット範囲」「シフトパレット」を貼り直す</td></tr>
+<tr><td><span class="macro">ShiftSetup_名前付き範囲更新</span></td><td>「シフト入力範囲」「シフトパレット」「医師名リスト範囲」「備考行範囲」を貼り直し、廃止した旧名を消す</td></tr>
 </table>
 
 <h3>生成される集計行の数式</h3>
@@ -161,8 +202,21 @@
 </table>
 
 <div class="warn">
-<strong>医師名スタンプの初期値はダミーです。</strong> パレットの医師名（<code>医師1</code>〜<code>医師9</code>）は、<code>ShiftSetup.bas</code> の <code>SS_PalVals</code> を編集して実際の医師名に置き換えてください。個人情報のため、書き換えた内容はGitにコミットしないでください。
+<strong>医師名スタンプの初期値はダミーです。</strong> パレットの医師名（<code>医師1</code>〜<code>医師10</code>）は、<code>ShiftSetup.bas</code> の <code>SS_PalVals</code> を編集して実際の医師名に置き換えてください。個人情報のため、書き換えた内容はGitにコミットしないでください。
 </div>
+
+<h3>シフト表の出力（ShiftExport）</h3>
+<p>パレットの <code>出力</code> をダブルクリックすると、印刷用にシフト表を書き出します。<span class="macro">ShiftExport_シフト表出力</span> を直接実行しても同じです。</p>
+<table>
+<tr><th style="width:150px">項目</th><th>内容</th></tr>
+<tr><td>出力する範囲</td><td>年月・タイトル行（日付行の1行上）〜 <code>過不足</code> 行 / A列〜AL列。<strong>パレットの3行は入りません</strong></td></tr>
+<tr><td>数式</td><td><strong>すべて値に変換</strong>します。元のブックが無くても崩れません</td></tr>
+<tr><td>条件付き書式</td><td>土日祝の色などは、<strong>見えている色をそのまま塗りとして焼き込み</strong>ます。条件付き書式は <code>祝日マスタ</code> を参照しているため、ルールのまま持ち出すと色が消えるためです</td></tr>
+<tr><td>ページ設定</td><td><strong>横向き</strong>、<strong>横1ページ×縦1ページ</strong>に収めます</td></tr>
+<tr><td>形式</td><td>実行時に <strong>PDF</strong> か <strong>Excel(.xlsx)</strong> を選びます</td></tr>
+<tr><td>保存先</td><td>ダイアログで指定します。既定のファイル名は <code>シフト表_2026年8月</code> のように対象月から作られます</td></tr>
+</table>
+<div class="info">元のシートは<strong>一切書き換えません</strong>。新しいブックに値と書式を複製してから加工します。</div>
 
 <h3>シート構造の調査（ShiftSurvey）</h3>
 <p>「思った位置に生成されない」「行を大きく作り替えた」ときは、まず <span class="macro">ShiftSurvey_シート構造調査</span> を実行してください。<strong>読み取り専用</strong>で、シートを一切書き換えません。</p>
@@ -233,7 +287,7 @@ STEP 7   手修正で仕上げ
 <p>設定後、<span class="macro">シフト設定チェック</span> を実行して警告がゼロか確認してください。</p>
 <table>
 <tr><th style="width:170px">警告</th><th>意味と対処</th></tr>
-<tr><td>入力範囲が下すぎる</td><td>範囲の下端が <code>医師数(診)</code> の2行上を超えている。名前付き範囲「シフトパレット範囲」の終端を直す</td></tr>
+<tr><td>入力範囲が下すぎる</td><td>範囲の下端が <code>医師数(診)</code> の2行上を超えている。名前付き範囲「シフト入力範囲」の終端を直す</td></tr>
 <tr><td>氏名の重複</td><td>同名が2行ある。先に見つかった設定だけが適用されるため、区別できる氏名に変更</td></tr>
 <tr><td>区分が対象外</td><td>「薬剤師」「事務員」以外。出勤数に計上されないので修正</td></tr>
 <tr><td>マスタ未登録</td><td>シフト表にあるがマスタに無い。既定値（薬剤師・通常・遅番可）で処理されます</td></tr>
@@ -290,6 +344,7 @@ STEP 7   手修正で仕上げ
 <tr><td>入力範囲</td><td>今回処理した入力欄のアドレス。意図した範囲か確認できます</td></tr>
 <tr><td>対象者／スキップ行</td><td>氏名のある行数と、空行・集計行として除外した行数</td></tr>
 <tr><td>各人の集計</td><td>出勤／休／連勤max／連休max／医5日／○●▲の回数</td></tr>
+<tr><td>休業者の行</td><td>マスタで <code>休業</code> に○が付いている人の行が<strong>灰色</strong>になります（解除すると自動で戻ります）</td></tr>
 <tr><td>公休ノルマ未達</td><td>空きセルが足りず配置しきれなかった。手入力を減らすか休日数を見直す</td></tr>
 <tr><td>事務員が不在の日</td><td>事務員ゼロの日数。回避を試みますが不可能な場合に発生</td></tr>
 <tr><td>遅番が目標に届かない日</td><td>▲の人数が設定値（既定3名）未満の日数</td></tr>
@@ -312,8 +367,12 @@ STEP 7   手修正で仕上げ
 <tr><th style="width:200px">マクロ名</th><th>動作</th></tr>
 <tr><td><span class="macro">シフト変更を戻す</span></td><td>直前のセッションを取り消して復元。<strong>繰り返し実行で1回ずつ遡れます</strong>（値・文字色・太字・背景色すべて復元）</td></tr>
 <tr><td><span class="macro">シフト白紙化</span></td><td>入力欄を全消去。これもログに記録され復元可能</td></tr>
-<tr><td><span class="macro">シフトログリセット</span></td><td>ログを全消去。<strong>実行後は過去に戻せなくなります</strong>（期替わり用）。<strong>A1の対象月を変更すると自動で確認ダイアログ</strong>が出ます</td></tr>
+<tr><td><span class="macro">シフトログリセット</span></td><td>ログを全消去。<strong>実行後は過去に戻せなくなります</strong>（期替わり用）。<strong>対象月を変更すると自動で確認ダイアログ</strong>が出ます（年月セルは数式なので、その元になる <code>AG</code> 列の月数を書き換えたときに反応します）。<strong>ブックを開いてから最初の1回は出ません</strong>（開いた時点の月を記憶するだけ。次に月が変わったときから確認します）</td></tr>
 </table>
+
+<div class="warn">
+<strong>対象月をスピンボタンで変える場合は、ボタンにマクロを登録してください。</strong>スピンボタン（フォームコントロール）がリンクセルに書き込む操作は、Excel の変更イベントを発生させません。そのため期替わりの確認が出ないことがあります。<br><br>スピンボタンを<strong>右クリック → マクロの登録</strong>で <span class="macro">シフト期替わり確認</span> を選んでください。手入力で年月を変えた場合は登録が無くても確認が出ます。
+</div>
 
 <div class="info">
 「セッション」とは1回の操作単位です。自動作成1回・白紙化1回・手動での同時複数セル変更が、それぞれ1セッションになります。
@@ -365,7 +424,7 @@ STEP 7   手修正で仕上げ
 <tr><td>休業設定が効いていない</td><td>氏名がシフト表と一致していない。<span class="macro">シフト設定チェック</span> で確認</td></tr>
 <tr><td>特定の人だけ設定が反映されない</td><td>氏名の綴り違い（全角/半角・スペース）。または同名が2行ある</td></tr>
 <tr><td>ダブルクリックが反応しない</td><td>パレットが <code>OFF</code> モード。<code>切替</code> か記号を選ぶ</td></tr>
-<tr><td>パレットの位置がずれた</td><td><span class="macro">ShiftSetup_パレット生成</span> で作り直す（日付行の直上3行に配置されます）</td></tr>
+<tr><td>パレットの位置がずれた</td><td><span class="macro">ShiftSetup_パレット生成</span> で作り直す（日付行の直上3行に配置されます。3行が無ければ挿入されます）</td></tr>
 <tr><td>「入力範囲が医師数(診)の2行上を超えています」</td><td>行を増やして緩衝行が埋まっている。<span class="macro">ShiftSetup_名前付き範囲更新</span> を実行すれば直ります</td></tr>
 <tr><td>入力できる行が足りない</td><td>範囲の下端が上すぎる。同じく <span class="macro">ShiftSetup_名前付き範囲更新</span> で直る</td></tr>
 <tr><td>集計行にシフトが入る</td><td>v7.1.0で除外済み。モジュールが古い可能性があります</td></tr>
@@ -393,7 +452,7 @@ STEP 7   手修正で仕上げ
 </table>
 
 <footer>
-くるむ薬局札幌店 シフト表 操作マニュアル　/　ShiftAuto v8.0.0・ShiftClick v9.0・ShiftSetup v1.2・ShiftCommon v1.1 準拠<br>
+くるむ薬局札幌店 シフト表 操作マニュアル　/　ShiftCommon v2.7・ShiftAuto v9.2.0・ShiftClick v9.3・ShiftSetup v2.4 準拠（各モジュールの版は1章の表を参照）<br>
 このマニュアルはブラウザで開いて印刷・PDF保存できます。
 </footer>
 
