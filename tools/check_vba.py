@@ -14,6 +14,7 @@
     8. 宣言セクションの外にある宣言 …………… コンパイルエラー
     9. マニュアルの版表記の古さ ………………… 実害なしだが誤解のもと
    10. 版を上げ忘れたモジュール ……………… どの版が動いているか分からなくなる
+   11. 組み込み名と衝突する変数名 …………… コンパイルエラー
 
     python3 tools/check_vba.py                     (検査1-9)
     python3 tools/check_vba.py --base origin/main  (検査1-10)
@@ -54,6 +55,22 @@ MOD_VAR = re.compile(r"^\s*(?:Public|Private)\s+([A-Za-z_]\w*)(?:\(\))?\s+As\s")
 MOD_DECL = re.compile(r"^\s*(?:Public|Private|Dim)\s+"
                       r"(?:Const\s+\w+|[A-Za-z_]\w*(?:\(\))?\s+As\s)")
 LINENO = re.compile(r"^\s*\d+\s*")
+
+# 11. VBA の組み込み関数・キーワードと同じ名前を変数に付けると衝突する。
+#     実際に cDate(組み込みの CDate)でコンパイルエラーになった。
+#     VBE は入力時に綴りを組み込み側の大小文字へ直すので、気づきにくい。
+BUILTIN_NAMES = {n.lower() for n in (
+    "CDate CStr CLng CInt CDbl CBool CVar CByte CCur CSng CDec "
+    "Date Time Now Timer Left Right Mid Len Val Str Format "
+    "Error Name Print Line Type String Array Input Width Space "
+    "Trim LTrim RTrim UCase LCase Split Join Replace InStr InStrRev "
+    "Asc Chr Abs Int Fix Sgn Sqr Rnd Round IIf Choose Switch Environ "
+    "Day Month Year Hour Minute Second Weekday DateAdd DateDiff DatePart"
+).split()}
+# 宣言("Dim x As T" / "Public Const x As T")と引数(ByVal x / ByRef x)を見る
+DECL_LINE = re.compile(r"^\s*(?:Dim|Static|Private|Public|Const)\s+(.*)$")
+DECL_NAME = re.compile(r"([A-Za-z_]\w*)\s*(?:\(\))?\s+As\s")
+ARG_NAME = re.compile(r"(?:ByVal|ByRef)\s+([A-Za-z_]\w*)")
 
 # プロジェクト固有の識別子だけを対象にする(VBA 組み込みは検査しない)
 IDENT = re.compile(
@@ -214,10 +231,22 @@ def check(base=None):
                     f"{mod}: 宣言セクションの外に宣言があります "
                     f"(src/{path.name}:{k + 1}: {ln.strip()[:60]})")
 
-        for ln in lines:
+        for k, ln in enumerate(lines):
             m = PUB_CONST.match(ln)
             if m:
                 pub_names[m.group(1)].add(mod)
+            # 11. 宣言セクションの変数も見る
+            #     プロシージャ内は下のループが見るので、ここは冒頭だけ
+            if PROC.match(ln):
+                break
+            c = re.sub(r"'.*$", "", ln)
+            d = DECL_LINE.match(c)
+            if d:
+                for nm in DECL_NAME.findall(d.group(1)):
+                    if nm.lower() in BUILTIN_NAMES:
+                        problems.append(
+                            f"{mod}: {nm} は VBA の組み込み名です "
+                            f"(src/{path.name}:{k + 1}) 別の名前にしてください")
 
         for vis, kind, name, start, end in procedures(lines):
             if vis == "Public":
@@ -263,6 +292,18 @@ def check(base=None):
                         problems.append(
                             f"{mod}.{name}: 到達しないコードがあります "
                             f"(src/{path.name}:{start + 2 + nxt}: {n})")
+
+            # 11. 組み込み名と衝突する変数名
+            for k, b in enumerate(code):
+                names = ARG_NAME.findall(b)
+                m = DECL_LINE.match(b)
+                if m:
+                    names += DECL_NAME.findall(m.group(1))
+                for nm in names:
+                    if nm.lower() in BUILTIN_NAMES:
+                        problems.append(
+                            f"{mod}.{name}: {nm} は VBA の組み込み名です "
+                            f"(src/{path.name}:{start + 2 + k}) 別の名前にしてください")
 
             # 6. エラーハンドラ
             if mod not in SKIP_HANDLER:

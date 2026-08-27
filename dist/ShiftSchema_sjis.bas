@@ -448,12 +448,13 @@ End Sub
 '--- 取り込みクエリの M 式 ---
 '    列名は SC_HolHeads と揃える。見出しを変えたら取り込みも追随する。
 Private Function SC_祝日M式() As String
-    Dim heads As Variant, cDate As String, cName As String
+    '--- 変数名に cDate は使わない。VBA の組み込み関数 CDate と衝突する ---
+    Dim heads As Variant, colDate As String, colName As String
     On Error GoTo ErrHandler
 
 10  heads = SC_HolHeads()
-20  cDate = CStr(heads(LBound(heads)))
-30  cName = CStr(heads(LBound(heads) + 1))
+20  colDate = CStr(heads(LBound(heads)))
+30  colName = CStr(heads(LBound(heads) + 1))
 
 40  SC_祝日M式 = _
         "let" & vbLf & _
@@ -462,11 +463,11 @@ Private Function SC_祝日M式() As String
             ", QuoteStyle=QuoteStyle.None])," & vbLf & _
         "  Hdr = Table.PromoteHeaders(Src, [PromoteAllScalars=true])," & vbLf & _
         "  Cols = Table.ColumnNames(Hdr)," & vbLf & _
-        "  Ren = Table.RenameColumns(Hdr, {{Cols{0}, """ & cDate & """}, " & _
-            "{Cols{1}, """ & cName & """}})," & vbLf & _
-        "  Typed = Table.TransformColumnTypes(Ren, {{""" & cDate & """, type date}, " & _
-            "{""" & cName & """, type text}})," & vbLf & _
-        "  Clean = Table.SelectRows(Typed, each [" & cDate & "] <> null)" & vbLf & _
+        "  Ren = Table.RenameColumns(Hdr, {{Cols{0}, """ & colDate & """}, " & _
+            "{Cols{1}, """ & colName & """}})," & vbLf & _
+        "  Typed = Table.TransformColumnTypes(Ren, {{""" & colDate & """, type date}, " & _
+            "{""" & colName & """, type text}})," & vbLf & _
+        "  Clean = Table.SelectRows(Typed, each [" & colDate & "] <> null)" & vbLf & _
         "in" & vbLf & _
         "  Clean"
     Exit Function
