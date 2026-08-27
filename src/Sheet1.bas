@@ -1,13 +1,19 @@
 Option Explicit
 '==================================================================
 '  シフト表 クリック入力 + 手動変更ログ + 期替わりリセット
-'  ＜シートモジュール＞  2026-08-26
+'  ＜シートモジュール v2.0＞  2026-08-27
 '  ※シフト表のシート見出しを右クリック →「コードの表示」で開き、
 '    ここに貼り付けること(標準モジュールではない)
 '
 '  入力欄の範囲は ShiftCommon.ShiftInputRange が一元管理する。
 '  イベントは高頻度で発生するため LogSuccess は呼ばない
 '  (エラー時のみ LogError を記録する)。
+'
+'  v2.0 変更:
+'   ・期替わり判定の対象セルを Me.Range("A1") 固定から
+'     ShiftCommon.MonthCell(Me) 経由に変更
+'     実シートの年月は「年月・タイトル行」のA列(A4)にあり、A1は空。
+'     旧実装では A4 を書き換えてもログリセットの確認が出なかった。
 '==================================================================
 Private Const MODULE_NAME As String = "Sheet1"
 
@@ -21,11 +27,11 @@ Private mFonts() As Long, mBolds() As Boolean, mFills() As Variant
 
 '--- セルを選んだだけ(シングルクリック) ---
 Private Sub Worksheet_SelectionChange(ByVal Target As Range)
-    Dim handled As Boolean
+    Dim Handled As Boolean
     On Error GoTo ErrHandler
 
 10  CacheGridState Target            ' ログ用: 先に変更前の状態を退避
-20  ShiftClick_Handle Target, "select", handled
+20  ShiftClick_Handle Target, "select", Handled
     Exit Sub
 ErrHandler:
     LogError MODULE_NAME, "Worksheet_SelectionChange", Err.Number, Err.Description, Erl, _
@@ -34,11 +40,11 @@ End Sub
 
 '--- ダブルクリック → 次の記号へ／スタンプを押す ---
 Private Sub Worksheet_BeforeDoubleClick(ByVal Target As Range, Cancel As Boolean)
-    Dim handled As Boolean
+    Dim Handled As Boolean
     On Error GoTo ErrHandler
 
-10  ShiftClick_Handle Target, "double", handled
-20  If handled Then Cancel = True
+10  ShiftClick_Handle Target, "double", Handled
+20  If Handled Then Cancel = True
     Exit Sub
 ErrHandler:
     LogError MODULE_NAME, "Worksheet_BeforeDoubleClick", Err.Number, Err.Description, Erl, _
@@ -47,27 +53,31 @@ End Sub
 
 '--- 右クリック → 1つ前に戻す／選択範囲にまとめてスタンプ ---
 Private Sub Worksheet_BeforeRightClick(ByVal Target As Range, Cancel As Boolean)
-    Dim handled As Boolean
+    Dim Handled As Boolean
     On Error GoTo ErrHandler
 
-10  ShiftClick_Handle Target, "right", handled
-20  If handled Then Cancel = True
+10  ShiftClick_Handle Target, "right", Handled
+20  If Handled Then Cancel = True
     Exit Sub
 ErrHandler:
     LogError MODULE_NAME, "Worksheet_BeforeRightClick", Err.Number, Err.Description, Erl, _
              "target=" & Target.Address(False, False)
 End Sub
 
-'--- 値が変わった → A1なら期替わりリセット確認 / 入力欄なら手動ログ記録 ---
+'--- 値が変わった → 年月セルなら期替わりリセット確認 / 入力欄なら手動ログ記録 ---
 Private Sub Worksheet_Change(ByVal Target As Range)
     Dim g As Range, grid As Range, k As Long, hit As Long
     Dim aAddrs() As String, aVals() As String, aFonts() As Long
     Dim aBolds() As Boolean, aFills() As Variant
+    Dim mc As Range
     On Error GoTo ErrHandler
 
-    '--- A1(対象月)の変更 = 期替わり → ログリセット確認 ---
-10  If Not Application.Intersect(Target, Me.Range("A1")) Is Nothing Then
-20      If IsDate(Me.Range("A1").Value) Then
+    '--- 年月セル(実シートはA4)の変更 = 期替わり → ログリセット確認 ---
+    '    位置は ShiftCommon.MonthCell が解決する(A1固定にしない)
+5   Set mc = MonthCell(Me)
+10  If Not mc Is Nothing Then
+15  If Not Application.Intersect(Target, mc) Is Nothing Then
+20      If IsDate(mc.Value) Then
 30          If MsgBox("対象月が変わりました。変更ログをリセットしますか?" & vbCrLf & _
                       "(前の期のログはすべて消去されます)", _
                       vbYesNo + vbQuestion, "期替わり") = vbYes Then
@@ -76,6 +86,7 @@ Private Sub Worksheet_Change(ByVal Target As Range)
 60              Application.EnableEvents = True
 70          End If
 80      End If
+85  End If
 90  End If
 
     '--- 入力欄の手動変更を記録 ---
@@ -144,3 +155,4 @@ ErrHandler:
              "range=" & rng.Address(False, False) & "; k=" & k
     mN = 0
 End Sub
+

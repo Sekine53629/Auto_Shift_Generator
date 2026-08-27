@@ -1,7 +1,7 @@
 Option Explicit
 '==================================================================
-'  シフト表 クリック入力マクロ ＜標準モジュール ShiftClick v9.0＞
-'  2026-08-26
+'  シフト表 クリック入力マクロ ＜標準モジュール ShiftClick v9.3＞
+'  2026-08-27
 '
 '  シート上の位置は ShiftCommon が一元管理する。
 '  本モジュールは「クリックしたときの振る舞い」だけを持つ。
@@ -11,12 +11,26 @@ Option Explicit
 '    本体行 + MARKER_OFFSET = ★マーカー行
 '    本体行 + LABEL_OFFSET  = ラベル行
 '
-'  v9.0 変更:
-'   ・範囲/ラベル/列/オフセットの定数と解決処理を ShiftCommon に移管
-'     (モジュールごとに別々のフォールバック番地を持たなくなった)
-'   ・パレット位置を「過不足行の下」から「表の上」に変更
-'   ・パレット生成は ShiftSetup_パレット生成 に一本化(重複解消)
-'   ・全プロシージャに ErrorLogger のエラーハンドラを追加
+'  ボタンの種類(ShiftCommon の IDX_* が定義):
+'    IDX_OFF        OFF    … マクロ停止
+'    IDX_AUTO       自動   … ダブルクリックで AutoShift を起動
+'    IDX_CYCLE      切替   … 順送り
+'    IDX_CLEARFILL  色消   … 背景色だけ消す
+'    IDX_FILL_FIRST..IDX_FILL_LAST
+'                   背景緑/橙/灰 … 値を書かず背景色だけ塗る
+'    IDX_ERASE      消去   … 空白スタンプ。記号はこの次から
+'
+'  v9.2 変更:
+'   ・ShiftAutoBridge を廃止し、AutoShiftPreflight / ShiftAuto_事前診断 を
+'     本モジュールへ移管(位置解決3関数は ShiftCommon v2.1 へ)
+'
+'  v9.1 変更:
+'   ・「自動」ボタンを追加。ダブルクリックで AutoShift を起動する
+'     (Application.Run で呼ぶため AutoShift 未実装でもコンパイル可)
+'   ・背景色ボタンを追加。StampArea が「値を書かず塗るだけ」に分岐
+'   ・順送りの巡回対象から医師名を除外できるようにした
+'     (CYCLE_INCLUDES_DOCTORS で切替)
+'   ・ShowMode に 自動 / 背景色 のメッセージを追加
 '==================================================================
 Private Const MODULE_NAME As String = "ShiftClick"
 
@@ -25,7 +39,6 @@ Private Const MODULE_NAME As String = "ShiftClick"
 Public Const CYCLE_TRIGGER As String = "double"
 Public Const STAMP_TRIGGER As String = "double"
 
-Public Const MARKER_CHAR   As String = "★"
 
 ' True: スタンプ時にパレットの背景色も反映する
 Public Const APPLY_FILL         As Boolean = True
@@ -35,11 +48,16 @@ Public Const CYCLE_RESETS_FILL  As Boolean = False
 Public Const MOVE_AFTER         As String = ""
 ' True: 数式の入ったセルは書き換えない
 Public Const SKIP_FORMULA_CELLS As Boolean = True
+' True: 順送りに医師名スタンプも含める / False: シフト記号のみ巡回
+Public Const CYCLE_INCLUDES_DOCTORS As Boolean = False
+' True: 「自動」実行前に確認ダイアログを出す
+Public Const AUTO_CONFIRM       As Boolean = True
 '------------------------ 設定 ここまで ---------------------------
 
 '--- 連続切替の巡回リスト: 空白＋パレットのスタンプ項目から自動生成 ---
 Private Function CycleValues(ByVal ws As Worksheet) As Variant
     Dim pal As Range, arr() As Variant, i As Long, n As Long, v As String
+    Dim lastIdx As Long
     On Error GoTo ErrHandler
 
 10  Set pal = PaletteRange(ws)
@@ -47,19 +65,28 @@ Private Function CycleValues(ByVal ws As Worksheet) As Variant
 30      CycleValues = Array("")
 40      Exit Function
 50  End If
-60  ReDim arr(0 To pal.Cells.Count)
-70  arr(0) = ""            ' 先頭は空白(消去)
-80  n = 0
-90  For i = IDX_ERASE To pal.Cells.Count
-100     v = Trim$(CStr(pal.Cells(1, i).Value))
-110     If Len(v) > 0 Then
-120         n = n + 1
-130         arr(n) = v
-140     End If
-150 Next i
-160 ReDim Preserve arr(0 To n)
-170 CycleValues = arr
+
+    '--- 巡回の終端: 医師名を含めない場合は医師名の直前まで ---
+60  lastIdx = pal.Cells.Count
+70  If Not CYCLE_INCLUDES_DOCTORS Then
+80      If IDX_DOC_FIRST - 1 < lastIdx Then lastIdx = IDX_DOC_FIRST - 1
+90  End If
+
+100 ReDim arr(0 To lastIdx)
+110 arr(0) = ""            ' 先頭は空白(消去)
+120 n = 0
+    '--- IDX_ERASE から開始。モードボタン・背景色ボタンは巡回に入れない ---
+130 For i = IDX_ERASE To lastIdx
+140     v = Trim$(CStr(pal.Cells(1, i).Value))
+150     If Len(v) > 0 Then
+160         n = n + 1
+170         arr(n) = v
+180     End If
+190 Next i
+200 ReDim Preserve arr(0 To n)
+210 CycleValues = arr
     Exit Function
+
 ErrHandler:
     LogError MODULE_NAME, "CycleValues", Err.Number, Err.Description, Erl, _
              "sheet=" & ws.Name & "; i=" & i & "; n=" & n
@@ -73,7 +100,7 @@ Public Sub ShiftClick_Handle(ByVal Target As Range, _
                              ByVal EventKind As String, _
                              ByRef Handled As Boolean)
     Dim ws As Worksheet, pal As Range, area As Range, grid As Range
-    Dim idx As Long
+    Dim idx As Long, palIdx As Long
     On Error GoTo ErrHandler
 
 10  Handled = False
@@ -81,48 +108,61 @@ Public Sub ShiftClick_Handle(ByVal Target As Range, _
 30  Set pal = PaletteRange(ws)
 40  If pal Is Nothing Then Exit Sub
 
-    '--- パレット上のクリック: モード切替 ---
+    '--- パレット上のクリック: モード切替 / 自動実行 ---
 50  If Not Application.Intersect(Target, pal) Is Nothing Then
 60      If EventKind = "right" Then Exit Sub
-70      SetStamp ws, Target.Cells(1, 1)
-80      Handled = True
-90      Exit Sub
-100 End If
+70      palIdx = PaletteIndexOf(ws, Target.Cells(1, 1))
+
+        '--- 「自動」はダブルクリックのみで AutoShift を起動 ---
+80      If palIdx = IDX_AUTO Then
+90          If EventKind = "double" Then
+100             Handled = True
+110             RunAutoShift ws
+120         End If
+130         Exit Sub
+140     End If
+
+150     SetStamp ws, Target.Cells(1, 1)
+160     Handled = True
+170     Exit Sub
+180 End If
 
     '--- シフト入力範囲との交差判定 ---
-110 Set grid = ShiftInputRange(ws)
-120 If grid Is Nothing Then Exit Sub
-130 Set area = Application.Intersect(ClickRange(Target, EventKind), grid)
-140 If area Is Nothing Then Exit Sub
-150 If Application.CutCopyMode <> False Then Exit Sub
+190 Set grid = ShiftInputRange(ws)
+200 If grid Is Nothing Then Exit Sub
+210 Set area = Application.Intersect(ClickRange(Target, EventKind), grid)
+220 If area Is Nothing Then Exit Sub
+230 If Application.CutCopyMode <> False Then Exit Sub
 
-160 idx = CurrentIndex(ws)
-170 If idx = IDX_OFF Then Exit Sub
+240 idx = CurrentIndex(ws)
+250 If idx = IDX_OFF Then Exit Sub
+    '--- 「自動」がモードとして残っていても入力欄では何もしない ---
+260 If idx = IDX_AUTO Then Exit Sub
 
-180 Application.EnableEvents = False
-190 If idx = IDX_CYCLE Then
-200     If area.Cells.Count = 1 Then
-210         If EventKind = "right" Then
-220             CycleOne area.Cells(1, 1), True
-230             Handled = True
-240         ElseIf Triggered(EventKind, CYCLE_TRIGGER) Then
-250             CycleOne area.Cells(1, 1), False
-260             Handled = True
-270         End If
-280     End If
-290 Else
-300     If EventKind = "right" Or Triggered(EventKind, STAMP_TRIGGER) Then
-310         StampArea ws, area, idx
-320         Handled = True
-330     End If
-340 End If
+270 Application.EnableEvents = False
+280 If idx = IDX_CYCLE Then
+290     If area.Cells.Count = 1 Then
+300         If EventKind = "right" Then
+310             CycleOne area.Cells(1, 1), True
+320             Handled = True
+330         ElseIf Triggered(EventKind, CYCLE_TRIGGER) Then
+340             CycleOne area.Cells(1, 1), False
+350             Handled = True
+360         End If
+370     End If
+380 Else
+390     If EventKind = "right" Or Triggered(EventKind, STAMP_TRIGGER) Then
+400         StampArea ws, area, idx
+410         Handled = True
+420     End If
+430 End If
 
-350 If Handled And Len(MOVE_AFTER) > 0 Then
+440 If Handled And Len(MOVE_AFTER) > 0 Then
         Select Case LCase$(MOVE_AFTER)
             Case "down":  MoveSel area, 1, 0
             Case "right": MoveSel area, 0, 1
         End Select
-360 End If
+450 End If
 
 CleanUp:
     On Error Resume Next
@@ -138,11 +178,84 @@ ErrHandler:
 End Sub
 
 '==================================================================
+' 「自動」ボタン
+'==================================================================
+'--- クリックされたセルがパレットの何番目かを返す(0 = パレット外) ---
+Private Function PaletteIndexOf(ByVal ws As Worksheet, ByVal c As Range) As Long
+    Dim pal As Range, i As Long
+    On Error GoTo ErrHandler
+
+10  Set pal = PaletteRange(ws)
+20  If pal Is Nothing Then Exit Function
+30  For i = 1 To pal.Cells.Count
+40      If pal.Cells(1, i).Address = c.Address Then
+50          PaletteIndexOf = i
+60          Exit Function
+70      End If
+80  Next i
+    Exit Function
+ErrHandler:
+    LogError MODULE_NAME, "PaletteIndexOf", Err.Number, Err.Description, Erl, _
+             "cell=" & c.Address(False, False)
+    PaletteIndexOf = 0
+End Function
+
+'--- AutoShift を起動する ---
+'    Application.Run で呼ぶため、AutoShift が未実装でもコンパイルは通る。
+Private Sub RunAutoShift(ByVal ws As Worksheet)
+    Dim savedMode As XlCalculation, savedEvents As Boolean
+    Dim reason As String
+    On Error GoTo ErrHandler
+
+    '--- 事前診断: 対象月セル・入力範囲・依存シートを確認 ---
+5   If Not AutoShiftPreflight(reason) Then
+6       MsgBox "自動作成を実行できません。" & vbCrLf & vbCrLf & reason, _
+               vbExclamation, "シフト自動作成"
+7       Exit Sub
+8   End If
+
+10  If AUTO_CONFIRM Then
+20      If MsgBox("シフトを自動作成します。" & vbCrLf & _
+                  "入力済みのセルは保持され、空白セルのみ埋まります。" & vbCrLf & vbCrLf & _
+                  "実行しますか?", _
+                  vbQuestion + vbYesNo, "シフト自動作成") <> vbYes Then Exit Sub
+30  End If
+
+40  Application.StatusBar = "シフト自動作成を実行中..."
+50  savedMode = Application.Calculation
+60  savedEvents = Application.EnableEvents
+70  Application.EnableEvents = False
+80  Application.Calculation = xlCalculationManual
+
+90  Application.Run AUTOSHIFT_MACRO
+
+100 Application.Calculation = savedMode
+110 Application.CalculateFull
+
+CleanUp:
+    On Error Resume Next
+    Application.Calculation = savedMode
+    Application.EnableEvents = True
+    Application.StatusBar = False
+    On Error GoTo 0
+    LogSuccess MODULE_NAME, "RunAutoShift", "Ran macro: " & AUTOSHIFT_MACRO
+    Exit Sub
+
+ErrHandler:
+    LogError MODULE_NAME, "RunAutoShift", Err.Number, Err.Description, Erl, _
+             "macro=" & AUTOSHIFT_MACRO & "; sheet=" & ws.Name
+    MsgBox "自動作成でエラーが発生しました:" & vbCrLf & Err.Description & vbCrLf & vbCrLf & _
+           "マクロ名 [ " & AUTOSHIFT_MACRO & " ] が存在するか確認してください。" & vbCrLf & _
+           "(ShiftCommon の AUTOSHIFT_MACRO で変更できます)", _
+           vbExclamation, "シフト自動作成"
+    Resume CleanUp
+End Sub
+
+'==================================================================
 ' 内部処理
 '==================================================================
 Private Function Triggered(ByVal EventKind As String, ByVal Trig As String) As Boolean
     On Error GoTo ErrHandler
-
 10  If EventKind = "double" Then
 20      Triggered = True
 30  ElseIf EventKind = "select" Then
@@ -161,7 +274,6 @@ End Function
 Private Function ClickRange(ByVal Target As Range, ByVal EventKind As String) As Range
     Dim sel As Range
     On Error GoTo ErrHandler
-
 10  Set ClickRange = Target
 20  If EventKind <> "right" Then Exit Function
 30  If Not TypeOf Selection Is Range Then Exit Function
@@ -176,24 +288,53 @@ ErrHandler:
     Set ClickRange = Target
 End Function
 
-'--- 範囲へのスタンプ適用(ダブルクリック時／選択範囲実行時 共用) ---
+'--- 範囲へのスタンプ適用 ---
+'    色消          … 背景色だけ消す(値は残す)
+'    背景緑/橙/灰  … 背景色だけ塗る(値は書き換えない)
+'    それ以外      … 値＋書式をコピー
 Private Sub StampArea(ByVal ws As Worksheet, ByVal area As Range, ByVal idx As Long)
-    Dim c As Range, pal As Range
+    Dim c As Range, pal As Range, src As Range
     On Error GoTo ErrHandler
 
 10  Set pal = PaletteRange(ws)
 20  If pal Is Nothing Then Exit Sub
-30  For Each c In area.Cells
-40      If idx = IDX_CLEARFILL Then
-50          c.Interior.Pattern = xlNone
-60      Else
-70          ApplyStamp c, pal.Cells(1, idx)
-80      End If
-90  Next c
+30  If idx < 1 Or idx > pal.Cells.Count Then Exit Sub
+40  Set src = pal.Cells(1, idx)
+
+50  For Each c In area.Cells
+60      If idx = IDX_CLEARFILL Then
+70          c.Interior.Pattern = xlNone
+80      ElseIf idx >= IDX_FILL_FIRST And idx <= IDX_FILL_LAST Then
+90          ApplyFillOnly c, src
+100     Else
+110         ApplyStamp c, src
+120     End If
+130 Next c
     Exit Sub
 ErrHandler:
     LogError MODULE_NAME, "StampArea", Err.Number, Err.Description, Erl, _
              "area=" & area.Address(False, False) & "; idx=" & idx
+End Sub
+
+'--- 背景色だけを塗る(値・文字色は触らない) ---
+Private Sub ApplyFillOnly(ByVal c As Range, ByVal src As Range)
+    On Error GoTo ErrHandler
+
+10  If SKIP_FORMULA_CELLS Then
+20      If c.HasFormula Then Exit Sub
+30  End If
+40  If c.Worksheet.ProtectContents And c.Locked Then Exit Sub
+
+50  If src.Interior.Pattern <> xlNone Then
+60      c.Interior.Color = src.Interior.Color
+70  Else
+        ' パレット側に色が無いときは塗りを外す
+80      c.Interior.Pattern = xlNone
+90  End If
+    Exit Sub
+ErrHandler:
+    LogError MODULE_NAME, "ApplyFillOnly", Err.Number, Err.Description, Erl, _
+             "cell=" & c.Address(False, False) & "; src=" & src.Address(False, False)
 End Sub
 
 '--- 1セルを次(前)の記号へ送る ---
@@ -286,22 +427,19 @@ End Function
 
 '--- クリックされたパレットのセルをモードに設定する ---
 Private Sub SetStamp(ByVal ws As Worksheet, ByVal c As Range)
-    Dim pal As Range, i As Long, hit As Long
+    Dim pal As Range, hit As Long
     On Error GoTo ErrHandler
 
 10  Set pal = PaletteRange(ws)
 20  If pal Is Nothing Then Exit Sub
-30  hit = 0
-40  For i = 1 To pal.Cells.Count
-50      If pal.Cells(1, i).Address = c.Address Then hit = i
-60  Next i
-70  If hit = 0 Then Exit Sub
+30  hit = PaletteIndexOf(ws, c)
+40  If hit = 0 Then Exit Sub
     ' 同じモードを再度クリックしたら連続切替に戻す
-80  If hit = CurrentIndex(ws) And hit <> IDX_CYCLE Then hit = IDX_CYCLE
+50  If hit = CurrentIndex(ws) And hit <> IDX_CYCLE Then hit = IDX_CYCLE
 
-90  Application.EnableEvents = False
-100 pal.Offset(MARKER_OFFSET, 0).ClearContents
-110 pal.Cells(1, hit).Offset(MARKER_OFFSET, 0).Value = MARKER_CHAR
+60  Application.EnableEvents = False
+70  pal.Offset(MARKER_OFFSET, 0).ClearContents
+80  pal.Cells(1, hit).Offset(MARKER_OFFSET, 0).Value = MARKER_CHAR
 
 CleanUp:
     On Error Resume Next
@@ -323,21 +461,33 @@ Private Sub ShowMode(ByVal ws As Worksheet, ByVal idx As Long)
 
 10  Set pal = PaletteRange(ws)
 20  If pal Is Nothing Then Exit Sub
+30  If LCase$(STAMP_TRIGGER) = "single" Then op = "クリック" Else op = "ダブルクリック"
+
         Select Case idx
             Case IDX_OFF
                 s = "シフト入力マクロ: OFF(通常のExcel操作)"
+
+            Case IDX_AUTO
+                s = "シフト入力マクロ: 自動作成　ダブルクリックで実行"
+
             Case IDX_CYCLE
                 If LCase$(CYCLE_TRIGGER) = "single" Then op = "クリック" Else op = "ダブルクリック"
                 s = "シフト入力マクロ: 連続切替　" & op & "で次の記号／右クリックで前へ"
+
             Case IDX_CLEARFILL
-                s = "シフト入力マクロ: 背景色クリア"
+                s = "シフト入力マクロ: 背景色クリア　" & op & "で消す"
+
+            Case IDX_FILL_FIRST To IDX_FILL_LAST
+                s = "シフト入力マクロ: 背景色ペイント [ " & _
+                    Trim$(CStr(pal.Cells(1, idx).Offset(LABEL_OFFSET, 0).Value)) & _
+                    " ]　" & op & "で塗る／範囲を選んで右クリックでまとめて塗る"
+
             Case Else
-                If LCase$(STAMP_TRIGGER) = "single" Then op = "クリック" Else op = "ダブルクリック"
                 s = "シフト入力マクロ: スタンプ [ " & _
                     Trim$(CStr(pal.Cells(1, idx).Value)) & " ]　" & _
                     op & "で押す／範囲を選んで右クリックでまとめて押す"
         End Select
-30  Application.StatusBar = s
+40  Application.StatusBar = s
     Exit Sub
 ErrHandler:
     LogError MODULE_NAME, "ShowMode", Err.Number, Err.Description, Erl, _
@@ -348,12 +498,11 @@ End Sub
 Private Sub MoveSel(ByVal area As Range, ByVal dr As Long, ByVal dc As Long)
     Dim t As Range
     On Error GoTo ErrHandler
-
 10  Set t = area.Cells(area.Cells.Count).Offset(dr, dc)
 20  If Not t Is Nothing Then t.Select
     Exit Sub
 ErrHandler:
-    ' シートの端では Offset が失敗する(想定内)ため通知しない
+    ' シートの端では Offset が失敗する(想定内)
     LogError MODULE_NAME, "MoveSel", Err.Number, Err.Description, Erl, _
              "area=" & area.Address(False, False) & "; dr=" & dr & "; dc=" & dc
 End Sub
@@ -380,8 +529,10 @@ Public Sub ShiftClick_選択範囲にスタンプ()
 110     Exit Sub
 120 End If
 130 idx = CurrentIndex(ws)
-140 If idx <= IDX_CYCLE Then
-150     MsgBox "パレットでスタンプする記号を選んでから実行してください。", vbExclamation
+    '--- モードボタン(OFF/自動/切替/色消)はスタンプではない ---
+140 If idx <= IDX_CLEARFILL Then
+150     MsgBox "パレットでスタンプする記号または背景色を選んでから" & vbCrLf & _
+               "実行してください。", vbExclamation
 160     Exit Sub
 170 End If
 
@@ -426,7 +577,6 @@ End Sub
 
 '==================================================================
 ' パターン追加: パレット右端に新しいシフトパターンを追加
-'   (名前付き範囲はラベル行を基準に自動拡張される)
 '==================================================================
 Public Sub ShiftClick_パターン追加()
     Dim ws As Worksheet, pal As Range, lastCell As Range, newCell As Range
@@ -460,15 +610,18 @@ Public Sub ShiftClick_パターン追加()
 
 190 Application.EnableEvents = False
     '--- 書式を右端のセルからコピー(マーカー行・本体・ラベル行) ---
-200 lastCell.Offset(MARKER_OFFSET, 0).Resize(3, 1).Copy
+200 lastCell.Offset(MARKER_OFFSET, 0).Resize(PALETTE_ROWS, 1).Copy
 210 newCell.Offset(MARKER_OFFSET, 0).PasteSpecial xlPasteFormats
 220 Application.CutCopyMode = False
-    '--- 値とラベルを書き込み → ラベルが入った時点で名前付き範囲が自動拡張 ---
+    '--- 値とラベルを書き込み ---
 230 newCell.Value = sym
 240 newCell.Offset(LABEL_OFFSET, 0).Value = lab
 250 Application.EnableEvents = True
 
-260 MsgBox "パターン [ " & sym & " ] を追加しました。" & vbCrLf & _
+    '--- 名前付き範囲を追随させる ---
+260 ShiftSetup_名前付き範囲更新
+
+270 MsgBox "パターン [ " & sym & " ] を追加しました。" & vbCrLf & _
            "パレット範囲: " & PaletteRange(ws).Address(False, False) & vbCrLf & vbCrLf & _
            "※パレットのセルに文字色・背景色を付けると、" & vbCrLf & _
            "　スタンプ時にその書式もコピーされます。", vbInformation
@@ -490,16 +643,12 @@ ErrHandler:
 End Sub
 
 '==================================================================
-' パレット再作成
-'   実体は ShiftSetup_パレット生成 に一本化(v9.0 で重複を解消)
-'   既存のボタン割当を壊さないため、入口だけ残してある。
+' パレット再作成(入口だけ。実体は ShiftSetup)
 '==================================================================
 Public Sub ShiftClick_パレット作成()
     On Error GoTo ErrHandler
-
 10  ShiftSetup_パレット生成
 20  ShowMode ActiveSheet, IDX_CYCLE
-
     LogSuccess MODULE_NAME, "ShiftClick_パレット作成", _
                "Delegated palette build to ShiftSetup_パレット生成"
     Exit Sub
@@ -515,32 +664,31 @@ End Sub
 Public Sub ShiftClick_セルフチェック()
     Dim ws As Worksheet, msg As String, srcS As String, srcP As String
     Dim grid As Range, pal As Range, drift As Long, docRow As Long
-    Dim warn As String, palRow As Long
+    Dim warn As String, palRow As Long, missing As String
     On Error GoTo ErrHandler
 
 10  Set ws = ActiveSheet
 20  If NamedRangeOrNothing(NM_SHIFT) Is Nothing Then
-30      srcS = "ラベルから計算"
+30      srcS = "計算で解決"
 40  Else
 50      srcS = "名前付き範囲"
 60  End If
 70  If NamedRangeOrNothing(NM_PALETTE) Is Nothing Then
-80      srcP = "ラベルから計算"
+80      srcP = "計算で解決"
 90  Else
 100     srcP = "名前付き範囲"
 110 End If
 
 120 Set grid = ShiftInputRange(ws)
 130 Set pal = PaletteRange(ws)
-140 docRow = LabelRow(ws, LBL_DOC)
+140 docRow = ShiftDocRow(ws)
 150 palRow = PaletteBodyRow(ws)
 
-    '--- 入力範囲の妥当性(下端が医師数の DOC_GAP 行上か) ---
+    '--- 入力範囲の妥当性 ---
 160 drift = ShiftRangeDrift(ws)
 170 If grid Is Nothing Then
 180     warn = vbCrLf & "■ シフト入力欄を特定できません" & vbCrLf & _
-               "　B列の開始日の数式、またはA列の「" & LBL_NOTE & "」「" & LBL_DOC & _
-               "」を確認してください" & vbCrLf
+               "　B列の開始日の数式、またはA列の「" & LBL_NOTE & "」を確認してください" & vbCrLf
 190 ElseIf drift > 0 Then
 200     warn = vbCrLf & "■ 範囲の下端が " & LBL_DOC & "(" & docRow & "行)の" & _
                DOC_GAP & "行上を " & drift & " 行超えています" & vbCrLf & _
@@ -550,28 +698,129 @@ Public Sub ShiftClick_セルフチェック()
                Abs(drift) & " 行上です(入力できる行が少なくなっています)" & vbCrLf
 230 End If
 
-240 msg = "シート名          : " & ws.Name & vbCrLf & _
+    '--- 依存シートの有無 ---
+240 If Not SheetExists(SHT_CFG) Then missing = missing & " " & SHT_CFG
+250 If Not SheetExists(SHT_HOLIDAY) Then missing = missing & " " & SHT_HOLIDAY
+260 If Not SheetExists(SHT_LOG) Then missing = missing & " " & SHT_LOG
+270 If Len(missing) > 0 Then
+280     warn = warn & vbCrLf & "■ 不足しているシート:" & missing & vbCrLf & _
+               "　ShiftSchema_不足シート生成 で作成できます" & vbCrLf
+290 End If
+
+300 msg = "シート名          : " & ws.Name & vbCrLf & _
           "シフト入力範囲    : " & _
               IIf(grid Is Nothing, "(未特定)", grid.Address(False, False)) & _
               "　←" & srcS & vbCrLf & _
-          "　上端=日付行の1行下 / 下端=" & LBL_DOC & "の" & DOC_GAP & "行上" & vbCrLf & _
+          "　上端=再掲日付行の1行下 / 下端=" & LBL_DOC & "の" & DOC_GAP & "行上" & vbCrLf & _
           "パレット範囲      : " & _
               IIf(pal Is Nothing, "(未特定)", pal.Address(False, False)) & _
               "　←" & srcP & vbCrLf & _
           "　パレット本体行  : " & palRow & " 行(日付行の" & PALETTE_GAP & "行上)" & vbCrLf & _
           "パレットのセル数  : " & IIf(pal Is Nothing, 0, pal.Cells.Count) & vbCrLf & _
-          "切替サイクル項目数: " & UBound(CycleValues(ws)) + 1 & vbCrLf & _
+          "切替サイクル項目数: " & UBound(CycleValues(ws)) + 1 & _
+              IIf(CYCLE_INCLUDES_DOCTORS, "(医師名を含む)", "(医師名を除く)") & vbCrLf & _
           "現在のモード番号  : " & CurrentIndex(ws) & vbCrLf & warn & vbCrLf & _
           "ここまで表示されれば、標準モジュールは正しく入っています。"
-250 MsgBox msg, vbInformation, "ShiftClick セルフチェック"
+310 MsgBox msg, vbInformation, "ShiftClick セルフチェック"
 
     LogSuccess MODULE_NAME, "ShiftClick_セルフチェック", _
-               "Reported ranges: grid=" & IIf(grid Is Nothing, "none", grid.Address(False, False)) & _
-               ", drift=" & drift
+               "grid=" & IIf(grid Is Nothing, "none", grid.Address(False, False)) & _
+               ", drift=" & drift & ", missing=[" & Trim$(missing) & "]"
     Exit Sub
 
 ErrHandler:
     LogError MODULE_NAME, "ShiftClick_セルフチェック", Err.Number, Err.Description, Erl, _
              "sheet=" & ws.Name & "; docRow=" & docRow & "; paletteRow=" & palRow
     MsgBox "セルフチェックでエラーが発生しました: " & Err.Description, vbExclamation
+End Sub
+
+
+'==================================================================
+' 自動作成の事前診断 (v9.2: ShiftAutoBridge から移管)
+'   ShiftAuto に入る前に前提を検査する。
+'   RunAutoShift から呼ばれ、問題があれば実行を止める。
+'==================================================================
+Public Function AutoShiftPreflight(ByRef reason As String) As Boolean
+    Dim ws As Worksheet, grid As Range, mc As Range
+    Dim docRow As Long, drift As Long, missing As String
+    On Error GoTo ErrHandler
+
+10  reason = ""
+20  Set ws = ShiftSheet()
+
+    '--- 対象月 ---
+30  Set mc = MonthCell(ws)
+40  If mc Is Nothing Then
+50      reason = reason & "■ 対象月のセルが見つかりません" & vbCrLf & _
+                 "　" & HeaderRow(ws) & "行のA列に年月を入れてください" & vbCrLf
+60  ElseIf Not IsDate(mc.Value) Then
+70      reason = reason & "■ 対象月(" & mc.Address(False, False) & _
+                 ")が日付ではありません" & vbCrLf
+80  End If
+
+    '--- 入力欄 ---
+90  Set grid = ShiftInputRange(ws)
+100 If grid Is Nothing Then
+110     reason = reason & "■ シフト入力欄を特定できません" & vbCrLf
+120 Else
+130     drift = ShiftRangeDrift(ws)
+140     docRow = ShiftDocRow(ws)
+150     If drift > 0 Then
+160         reason = reason & "■ 入力欄の下端が " & LBL_DOC & "(" & docRow & _
+                     "行)の" & DOC_GAP & "行上を " & drift & " 行超えています" & vbCrLf & _
+                     "　正しい終端: " & (docRow - DOC_GAP) & "行" & vbCrLf
+170     End If
+180 End If
+
+    '--- 依存シート ---
+190 If Not SheetExists(SHT_CFG) Then missing = missing & " " & SHT_CFG
+200 If Not SheetExists(SHT_HOLIDAY) Then missing = missing & " " & SHT_HOLIDAY
+210 If Not SheetExists(SHT_LOG) Then missing = missing & " " & SHT_LOG
+220 If Len(missing) > 0 Then
+230     reason = reason & "■ 不足しているシート:" & missing & vbCrLf & _
+                 "　ShiftSchema_不足シート生成 で作成できます" & vbCrLf
+240 End If
+
+250 AutoShiftPreflight = (Len(reason) = 0)
+    Exit Function
+
+ErrHandler:
+    LogError MODULE_NAME, "AutoShiftPreflight", Err.Number, Err.Description, Erl, _
+             "docRow=" & docRow & "; drift=" & drift
+    reason = reason & "■ 診断中にエラー: " & Err.Description & vbCrLf
+    AutoShiftPreflight = False
+End Function
+
+'--- 診断結果をダイアログで見せる(単体実行用) ---
+Public Sub ShiftAuto_事前診断()
+    Dim reason As String, ok As Boolean, ws As Worksheet, mc As Range
+    Dim grid As Range
+    On Error GoTo ErrHandler
+
+10  Set ws = ShiftSheet()
+20  ok = AutoShiftPreflight(reason)
+30  Set mc = MonthCell(ws)
+40  Set grid = ShiftInputRange(ws)
+
+50  If ok Then
+60      MsgBox "自動作成の前提は満たされています。" & vbCrLf & vbCrLf & _
+               "対象月    : " & IIf(mc Is Nothing, "(不明)", _
+                   mc.Address(False, False) & " = " & Format(mc.Value, "yyyy年m月")) & vbCrLf & _
+               "入力範囲  : " & IIf(grid Is Nothing, "(未特定)", _
+                   grid.Address(False, False)) & vbCrLf & _
+               "日付行    : " & DateRow(ws) & " 行" & vbCrLf & _
+               "医師数行  : " & ShiftDocRow(ws) & " 行" & vbCrLf & _
+               "起動マクロ: " & AUTOSHIFT_MACRO, _
+               vbInformation, "自動作成 事前診断"
+70  Else
+80      MsgBox "自動作成を実行する前に、次を解消してください。" & vbCrLf & vbCrLf & reason, _
+               vbExclamation, "自動作成 事前診断"
+90  End If
+
+    LogSuccess MODULE_NAME, "ShiftAuto_事前診断", "ok=" & ok
+    Exit Sub
+
+ErrHandler:
+    LogError MODULE_NAME, "ShiftAuto_事前診断", Err.Number, Err.Description, Erl, ""
+    MsgBox "事前診断でエラーが発生しました: " & Err.Description, vbExclamation
 End Sub
