@@ -12,6 +12,7 @@
     6. エラーハンドラの無いプロシージャ ………… CLAUDE.md Tier 2 違反
     7. どこにも定義が無い識別子 ………………… コンパイルエラー
     8. 宣言セクションの外にある宣言 …………… コンパイルエラー
+    9. マニュアルの版表記の古さ ………………… 実害なしだが誤解のもと
 
     python3 tools/check_vba.py
 """
@@ -27,6 +28,14 @@ SRC_DIR = ROOT / "src"
 # 共有モジュール。自分のエラーは自分で記録できないため On Error Resume Next が
 # 正しい設計であり、ハンドラ検査の対象外とする。改変もしない。
 SKIP_HANDLER = {"ErrorLogger"}
+
+# 版表記を照合するマニュアル。モジュール冒頭の版が載っているか確認する。
+MANUAL = ROOT / "docs" / "manual.html"
+# 版を持たないモジュール(共有モジュールのため無改変)
+SKIP_VERSION = {"ErrorLogger", "Sheet1"}
+# マニュアルの表での表記がモジュール名と違うもの
+MANUAL_LABEL = {"AutoShiftGenerator": "ShiftAuto"}
+VER_RE = re.compile(r"v[0-9]+(?:[.][0-9]+)*")
 
 PROC = re.compile(r"^\s*(Public|Private)\s+(Sub|Function)\s+([^\s(]+)")
 END = re.compile(r"^\s*End\s+(Sub|Function)\s*$")
@@ -166,6 +175,31 @@ def check():
                     problems.append(f"{mod}.{name}: On Error GoTo ErrHandler がありません")
                 if len([b for b in body if b.strip() == "ErrHandler:"]) != 1:
                     problems.append(f"{mod}.{name}: ErrHandler ラベルが1つではありません")
+
+    # 9. マニュアルの版表記が実コードと合っているか
+    #    マニュアルのモジュール表の「版」セルと、各モジュール冒頭の版を
+    #    1行ずつ突き合わせる。どこかに同じ文字列があるだけでは通さない。
+    if MANUAL.exists():
+        manual = io.open(MANUAL, encoding="utf-8").read()
+        for mod, text in sorted(sources.items()):
+            if mod in SKIP_VERSION:
+                continue
+            m = VER_RE.search(text[:1200])
+            if not m:
+                problems.append(f"{mod}: 冒頭に版の表記がありません")
+                continue
+            label = MANUAL_LABEL.get(mod, mod)
+            row = re.search(
+                r"<code>" + re.escape(label) + r"</code>"
+                r"(?:<br>\([^)]*\))?</td><td>([^<]*)</td>", manual)
+            if not row:
+                problems.append(
+                    f"{mod}: docs/manual.html のモジュール表に行がありません "
+                    f"(表記: {label})")
+            elif row.group(1).strip() != m.group(0):
+                problems.append(
+                    f"{mod}: 版が食い違っています "
+                    f"(コード {m.group(0)} / マニュアル {row.group(1).strip()})")
 
     # 5. モジュール間で重複する Public 名
     for name, mods in sorted(pub_names.items()):
