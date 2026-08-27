@@ -1,13 +1,24 @@
 Option Explicit
 '==================================================================
 '  シフト表 クリック入力 + 手動変更ログ + 期替わりリセット
-'  ＜シートモジュール v2.1＞  2026-08-27
+'  ＜シートモジュール v2.2＞  2026-08-27
 '  ※シフト表のシート見出しを右クリック →「コードの表示」で開き、
 '    ここに貼り付けること(標準モジュールではない)
 '
 '  入力欄の範囲は ShiftCommon.ShiftInputRange が一元管理する。
 '  イベントは高頻度で発生するため LogSuccess は呼ばない
 '  (エラー時のみ LogError を記録する)。
+'
+'  v2.2 変更:
+'   ・MonthCellCached を廃止し、MonthCell を毎回呼ぶ形に戻した。
+'     位置を覚える実装には穴があった。A4 が一時的に日付でなくなると
+'     MonthCell のフォールバックで開始日セル(B5)が記憶され、B5 は常に
+'     日付なので再探索の条件が二度と成立しない。A4 が戻っても B5 を
+'     見続け、「対象月セルは A4」という前提が静かに崩れる。
+'     穴を塞ぐには覚えた位置が HeaderRow の A列かを確かめる必要があるが、
+'     その確認自体が B列走査を伴うため、キャッシュの意味が無くなる。
+'     DateFormulaRow は最初の一致で抜けるので、実シートでは5行目で
+'     確定する。1回の再計算あたりの走査は数回で足りる。
 '
 '  v2.1 変更:
 '   ・Worksheet_Calculate を追加。期替わり判定が発火していなかった。
@@ -37,7 +48,6 @@ Private Const MAX_CACHE_CELLS As Long = 200
 
 '--- 期替わり判定の状態 ---
 Private mLastMonth As Date     ' 直前に見た対象月(0 = 未取得)
-Private mMonthAddr As String   ' 対象月セルの位置(毎回探さないため)
 
 '--- 手動変更の記録用キャッシュ(選択時に変更前の状態を退避) ---
 Private mN As Long
@@ -102,7 +112,7 @@ Private Sub CheckMonthChanged()
     Dim c As Range, d As Date
     On Error GoTo ErrHandler
 
-10  Set c = MonthCellCached()
+10  Set c = MonthCell(Me)
 20  If c Is Nothing Then Exit Sub
 30  If Not IsDate(c.Value) Then Exit Sub
 40  d = CDate(c.Value)
@@ -138,30 +148,6 @@ ErrHandler:
              "lastMonth=" & Format(mLastMonth, "yyyy-mm")
     Resume CleanUp
 End Sub
-
-'--- 対象月セル(位置は一度だけ解決して覚える) ---
-'    MonthCell は B列を最大200行走査するため、再計算のたびに呼ぶと
-'    スタンプ1回ごとにその走査が入る。覚えた位置が日付でなくなったら
-'    そのときだけ探し直す。
-Private Function MonthCellCached() As Range
-    On Error GoTo ErrHandler
-
-10  If Len(mMonthAddr) > 0 Then
-20      Set MonthCellCached = Me.Range(mMonthAddr)
-30      If IsDate(MonthCellCached.Value) Then Exit Function
-40  End If
-50  Set MonthCellCached = MonthCell(Me)
-60  If Not MonthCellCached Is Nothing Then
-70      mMonthAddr = MonthCellCached.Address(False, False)
-80  End If
-    Exit Function
-
-ErrHandler:
-    LogError MODULE_NAME, "MonthCellCached", Err.Number, Err.Description, Erl, _
-             "addr=" & mMonthAddr
-    mMonthAddr = ""
-    Set MonthCellCached = Nothing
-End Function
 
 '--- 値が変わった → 年月セルなら期替わりリセット確認 / 入力欄なら手動ログ記録 ---
 Private Sub Worksheet_Change(ByVal Target As Range)
