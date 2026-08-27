@@ -15,8 +15,9 @@
     9. マニュアルの版表記の古さ ………………… 実害なしだが誤解のもと
    10. 版を上げ忘れたモジュール ……………… どの版が動いているか分からなくなる
    11. 組み込み名と衝突する変数名 …………… コンパイルエラー
+   12. プロシージャ内で重複する行番号 ………… コンパイルエラー
 
-    python3 tools/check_vba.py                     (検査1-9)
+    python3 tools/check_vba.py                     (検査1-9, 11, 12)
     python3 tools/check_vba.py --base origin/main  (検査1-10)
 
 検査10だけは git の履歴を見る。--base を省いた場合は origin/main
@@ -304,6 +305,24 @@ def check(base=None):
                         problems.append(
                             f"{mod}.{name}: {nm} は VBA の組み込み名です "
                             f"(src/{path.name}:{start + 2 + k}) 別の名前にしてください")
+
+            # 12. 同じプロシージャ内で重複する行番号
+            #     VBA では行番号はラベルなので、重複すると
+            #     「既に宣言されています」でコンパイルが通らない。
+            #     手で番号を振り直すときに起きやすい。
+            seen_no = {}
+            for k, b in enumerate(body):
+                m = re.match(r"^(\d+)[ 	]", b)
+                if not m:
+                    continue
+                lbl = m.group(1)
+                if lbl in seen_no:
+                    problems.append(
+                        f"{mod}.{name}: 行番号 {lbl} が重複しています "
+                        f"(src/{path.name}:{seen_no[lbl]} と "
+                        f"{start + 2 + k})")
+                else:
+                    seen_no[lbl] = start + 2 + k
 
             # 6. エラーハンドラ
             if mod not in SKIP_HANDLER:
