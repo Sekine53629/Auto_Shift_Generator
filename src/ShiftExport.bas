@@ -35,6 +35,7 @@ Public Sub ShiftExport_シフト表出力()
     Dim ws As Worksheet, src As Range
     Dim fmt As Long, path As String
     Dim newBk As Workbook, dst As Worksheet
+    Dim done As Boolean
     On Error GoTo ErrHandler
 
 10  Set ws = ShiftSheet()
@@ -56,13 +57,16 @@ Public Sub ShiftExport_シフト表出力()
 
 120 Set newBk = XP_BuildBook(ws, src, dst)
 130 If newBk Is Nothing Then
-140     MsgBox "出力用ブックを作成できませんでした。", vbExclamation, "シフト表の出力"
+140     MsgBox "出力用ブックを作成できませんでした。" & vbCrLf & vbCrLf & _
+               "詳しい原因は C:\VBAErrorLogs\ の当日のログに記録されています。", _
+               vbExclamation, "シフト表の出力"
 150     GoTo CleanUp
 160 End If
 
 170 XP_SetPageSetup dst
 180 If Not XP_Save(newBk, dst, fmt, path) Then GoTo CleanUp
 
+185 done = True
 190 MsgBox "シフト表を出力しました。" & vbCrLf & vbCrLf & path, _
            vbInformation, "シフト表の出力"
 
@@ -72,9 +76,11 @@ CleanUp:
     If Not newBk Is Nothing Then newBk.Close SaveChanges:=False
     Application.ScreenUpdating = True
     On Error GoTo 0
-    LogSuccess MODULE_NAME, "ShiftExport_シフト表出力", _
-               "format=" & fmt & "; range=" & _
-               IIf(src Is Nothing, "none", src.Address(False, False))
+    ' 途中で中止した場合に成功として残さない
+    If done Then
+        LogSuccess MODULE_NAME, "ShiftExport_シフト表出力", _
+                   "format=" & fmt & "; path=" & path
+    End If
     Exit Sub
 
 ErrHandler:
@@ -186,10 +192,14 @@ Private Function XP_BuildBook(ByVal ws As Worksheet, ByVal src As Range, _
 10  Set bk = Workbooks.Add(xlWBATWorksheet)
 20  Set dst = bk.Worksheets(1)
 
+    '--- 貼り付けは 幅 → 値 → 書式 の順にする ---
+    '    先に書式(結合セル)を入れてから値を貼ると、貼り付け先に結合セルが
+    '    できているため「コピー領域と貼り付け領域のサイズが違う」で落ちる。
+    '    値を先に入れておけば、あとから書式と結合を重ねられる。
 30  src.Copy
 40  dst.Range("A1").PasteSpecial xlPasteColumnWidths
-50  dst.Range("A1").PasteSpecial xlPasteAll        ' 書式・結合セルを持ってくる
-60  dst.Range("A1").PasteSpecial xlPasteValues     ' 数式は値に置き換える
+50  dst.Range("A1").PasteSpecial xlPasteValues     ' 数式ではなく計算結果が入る
+60  dst.Range("A1").PasteSpecial xlPasteFormats    ' 書式・結合セルを重ねる
 70  Application.CutCopyMode = False
 
     '--- 行の高さは貼り付けで写らないので個別に合わせる ---
@@ -197,7 +207,7 @@ Private Function XP_BuildBook(ByVal ws As Worksheet, ByVal src As Range, _
 90      dst.Rows(i).RowHeight = src.Rows(i).RowHeight
 100 Next i
 
-110 dst.Range("A1").Select
+    ' Select はアクティブシートでないと失敗する。出力には不要なので行わない。
 120 Set XP_BuildBook = bk
     Exit Function
 
