@@ -23,6 +23,20 @@ DIST_DIR = ROOT / "dist"
 # Attribute を付けず貼り付け用のテキストとして出力する。
 SHEET_MODULES = {"Sheet1"}
 
+CRLF = "\r\n"
+LF = "\n"
+CR = "\r"
+
+
+def to_crlf(text):
+    """改行を CRLF に揃える。
+
+    作業ツリーの改行は環境や .gitattributes の適用状況で LF にも CRLF にも
+    なりうる。出力がそれに左右されると --check がすり抜けるため、ここで
+    正規化する。VBE は CRLF を前提に読み込むので、これが正しい出力でもある。
+    """
+    return text.replace(CRLF, LF).replace(CR, LF).replace(LF, CRLF)
+
 
 def jobs():
     """(srcパス, distパス, 先頭に足すヘッダー) を列挙する。"""
@@ -33,7 +47,7 @@ def jobs():
             out.append((src, DIST_DIR / f"{name}_sjis.txt", ""))
         else:
             out.append((src, DIST_DIR / f"{name}_sjis.bas",
-                        f'Attribute VB_Name = "{name}"\r\n'))
+                        f'Attribute VB_Name = "{name}"' + CRLF))
     return out
 
 
@@ -54,7 +68,7 @@ def build(check=False):
 
     ng = []
     for src, dst, header in todo:
-        text = header + io.open(src, encoding="utf-8", newline="").read()
+        text = to_crlf(header + io.open(src, encoding="utf-8", newline="").read())
         try:
             data = text.encode("cp932")
         except UnicodeEncodeError as e:
