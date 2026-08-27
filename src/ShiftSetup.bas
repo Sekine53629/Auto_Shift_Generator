@@ -1,9 +1,14 @@
 Option Explicit
 '==================================================================
-'  シフト表 初期設定マクロ ＜標準モジュール ShiftSetup v2.9＞
+'  シフト表 初期設定マクロ ＜標準モジュール ShiftSetup v3.0＞
 '  2026-08-27
 '  ShiftCommon / ShiftSchema / ShiftClick と併用。
 '  シート上の位置はすべて ShiftCommon が解決する。
+'
+'  v3.0: 祝日サマリーの文言を「休みのトータル」から「公休ノルマ」に変更。
+'        この値(土日+平日の祝日)は自動作成が使う公休ノルマそのものだが、
+'        そう読めなかったため別の値を規定休日だと思い込む混乱があった。
+'        計算式は変えていない。
 '
 '  v2.9: 私有定数 DOC_BUSY_COUNT を廃止し ShiftCommon.DOC_BUSY_N を使う。
 '
@@ -508,11 +513,14 @@ Public Sub ShiftSetup_ヘッダ数式()
 200 End With
 
     '--- 祝日サマリー ---
+    '    wk+hol は AS_日情報 の mTargetOff と同じ数になる(土日を数え、
+    '    祝日は平日のものだけ足して二重計上を避ける)。通常ルールの人の
+    '    規定休日はこの値なので、そう読めるように文言を合わせる。
 210 f = "=LET(d," & COL_FIRST & dateRowNo & ":" & COL_LAST & dateRowNo & _
         ",inM,--(MONTH(d)=MONTH(A" & hRow & "))" & _
         ",wk,SUMPRODUCT(inM*(WEEKDAY(d,2)>5))" & _
         ",hol,SUMPRODUCT(inM*(WEEKDAY(d,2)<6)*COUNTIF(" & SHT_HOLIDAY & "!$A:$A,d))" & _
-        ",""土日公休""&wk&""回　祝日""&hol&""回　休みのトータル""&(wk+hol)&""回"")"
+        ",""土日公休""&wk&""回　祝日""&hol&""回　公休ノルマ""&(wk+hol)&""日"")"
 220 With ws.Cells(hRow, ws.Range(COL_HOL_SUMM & "1").Column)
         .Formula2 = f
         .Font.Italic = True
