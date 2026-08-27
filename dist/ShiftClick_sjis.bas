@@ -748,8 +748,9 @@ Public Sub ShiftClick_パターン追加()
 
 270 MsgBox "パターン [ " & sym & " ] を追加しました。" & vbCrLf & _
            "パレット範囲: " & PaletteRange(ws).Address(False, False) & vbCrLf & vbCrLf & _
-           "※パレットのセルに文字色・背景色を付けると、" & vbCrLf & _
-           "　スタンプ時にその書式もコピーされます。", vbInformation
+           "※パレットのセルに付けた文字色・背景色は" & vbCrLf & _
+           "　シフト表には移りません_値と太字だけが移ります_。" & vbCrLf & _
+           "　シフト表を塗るときは背景色ボタンを使ってください。", vbInformation
 
 CleanUp:
     On Error Resume Next
