@@ -48,8 +48,6 @@ Public Const CYCLE_RESETS_FILL  As Boolean = False
 Public Const MOVE_AFTER         As String = ""
 ' True: 数式の入ったセルは書き換えない
 Public Const SKIP_FORMULA_CELLS As Boolean = True
-' True: 順送りに医師名スタンプも含める / False: シフト記号のみ巡回
-Public Const CYCLE_INCLUDES_DOCTORS As Boolean = False
 ' True: 「自動」実行前に確認ダイアログを出す
 Public Const AUTO_CONFIRM       As Boolean = True
 '------------------------ 設定 ここまで ---------------------------
@@ -66,20 +64,19 @@ Private Function CycleValues(ByVal ws As Worksheet) As Variant
 40      Exit Function
 50  End If
 
-60  lastIdx = pal.Cells.Count
+    '--- 巡回はシフト入力欄でしか働かないため、シフト記号だけを対象にする ---
+    '    医師名スタンプと備考スタンプは、それぞれ専用の場所にしか押せない
+60  lastIdx = IDX_DOC_FIRST - 1
+70  If lastIdx > pal.Cells.Count Then lastIdx = pal.Cells.Count
 100 ReDim arr(0 To lastIdx)
 110 arr(0) = ""            ' 先頭は空白(消去)
 120 n = 0
-    '--- IDX_ERASE から開始。モードボタン・背景色ボタンは巡回に入れない ---
-    '    医師名だけを飛ばす(その後ろの銀行などは巡回に残す)
 130 For i = IDX_ERASE To lastIdx
-135     If CYCLE_INCLUDES_DOCTORS Or Not IsDoctorStamp(i) Then
-140         v = Trim$(CStr(pal.Cells(1, i).Value))
-150         If Len(v) > 0 Then
-160             n = n + 1
-170             arr(n) = v
-180         End If
-185     End If
+140     v = Trim$(CStr(pal.Cells(1, i).Value))
+150     If Len(v) > 0 Then
+160         n = n + 1
+170         arr(n) = v
+180     End If
 190 Next i
 200 ReDim Preserve arr(0 To n)
 210 CycleValues = arr
@@ -97,8 +94,8 @@ End Function
 Public Sub ShiftClick_Handle(ByVal Target As Range, _
                              ByVal EventKind As String, _
                              ByRef Handled As Boolean)
-    Dim ws As Worksheet, pal As Range, area As Range, grid As Range
-    Dim docBlk As Range, inDoc As Boolean
+    Dim ws As Worksheet, pal As Range, area As Range
+    Dim kind As Long
     Dim idx As Long, palIdx As Long
     On Error GoTo ErrHandler
 
@@ -126,10 +123,8 @@ Public Sub ShiftClick_Handle(ByVal Target As Range, _
 170     Exit Sub
 180 End If
 
-    '--- 書き込み先の判定: スタッフ入力欄+備考行 または 医師名欄 ---
-190 Set grid = EditableRange(ws)
-200 Set docBlk = DoctorBlock(ws)
-210 Set area = ClickTargetArea(ws, ClickRange(Target, EventKind), grid, docBlk, inDoc)
+    '--- 書き込み先の判定: シフト入力欄 / 備考行 / 医師名欄 ---
+210 Set area = ClickTargetArea(ws, ClickRange(Target, EventKind), kind)
 220 If area Is Nothing Then Exit Sub
 230 If Application.CutCopyMode <> False Then Exit Sub
 
@@ -138,7 +133,7 @@ Public Sub ShiftClick_Handle(ByVal Target As Range, _
     '--- 「自動」がモードとして残っていても入力欄では何もしない ---
 260 If idx = IDX_AUTO Then Exit Sub
     '--- 記号の種類と書き込み先が噛み合わない組み合わせは無視する ---
-265 If Not StampAllowedHere(idx, inDoc) Then Exit Sub
+265 If Not StampAllowedHere(idx, kind) Then Exit Sub
 
 270 Application.EnableEvents = False
 280 If idx = IDX_CYCLE Then
@@ -255,49 +250,100 @@ End Sub
 '==================================================================
 ' 内部処理
 '==================================================================
-'--- クリック先が書き込み可能な場所か判定して対象範囲を返す ---
-'    grid   = スタッフ入力欄 + 備考行 (EditableRange)
-'    docBlk = 医師名欄
-'    どちらでもなければ Nothing。inDoc は医師名欄だったかを返す。
+'--- クリック先の種別を判定して対象範囲を返す ---
+'    シフト入力欄 → 備考行 → 医師名欄 の順に見る。
+'    どれでもなければ Nothing (kind = TGT_NONE)。
 Private Function ClickTargetArea(ByVal ws As Worksheet, ByVal clicked As Range, _
-                                 ByVal grid As Range, ByVal docBlk As Range, _
-                                 ByRef inDoc As Boolean) As Range
+                                 ByRef kind As Long) As Range
+    Dim rng As Range
     On Error GoTo ErrHandler
 
-10  inDoc = False
-20  If Not grid Is Nothing Then
-30      Set ClickTargetArea = Application.Intersect(clicked, grid)
-40      If Not ClickTargetArea Is Nothing Then Exit Function
-50  End If
-60  If Not docBlk Is Nothing Then
-70      Set ClickTargetArea = Application.Intersect(clicked, docBlk)
-80      If Not ClickTargetArea Is Nothing Then inDoc = True
+10  kind = TGT_NONE
+
+20  Set rng = ShiftInputRange(ws)
+30  If Not rng Is Nothing Then
+40      Set ClickTargetArea = Application.Intersect(clicked, rng)
+50      If Not ClickTargetArea Is Nothing Then
+60          kind = TGT_SHIFT
+70          Exit Function
+80      End If
 90  End If
+
+100 Set rng = NoteRange(ws)
+110 If Not rng Is Nothing Then
+120     Set ClickTargetArea = Application.Intersect(clicked, rng)
+130     If Not ClickTargetArea Is Nothing Then
+140         kind = TGT_NOTE
+150         Exit Function
+160     End If
+170 End If
+
+180 Set rng = DoctorBlock(ws)
+190 If Not rng Is Nothing Then
+200     Set ClickTargetArea = Application.Intersect(clicked, rng)
+210     If Not ClickTargetArea Is Nothing Then kind = TGT_DOC
+220 End If
     Exit Function
 ErrHandler:
     LogError MODULE_NAME, "ClickTargetArea", Err.Number, Err.Description, Erl, _
              "clicked=" & clicked.Address(False, False)
     Set ClickTargetArea = Nothing
+    kind = TGT_NONE
 End Function
 
 '--- その記号をその場所に押してよいか ---
-'    医師名欄  : 医師名スタンプ / 消去 / 色消 のみ
-'    入力欄    : 医師名スタンプ以外(銀行などの備考用スタンプはここで使う)
-'    (医師名欄に ○▲ が入ると医師数の COUNTA がずれ、入力欄に医師名が入ると
-'     出勤記号として数えられないため、両方向で弾く)
-Private Function StampAllowedHere(ByVal idx As Long, ByVal inDoc As Boolean) As Boolean
+'    シフト入力欄 : シフト記号のみ(医師名・備考スタンプは不可)
+'    備考行       : 備考スタンプ + 消去 / 色消
+'    医師名欄     : 医師名スタンプ + 消去 / 色消
+'    それぞれの場所に別の記号が入ると集計がずれるため、専用にする。
+'    消去と色消はどこでも許可する(書き間違いを直せなくなるため)。
+Private Function StampAllowedHere(ByVal idx As Long, ByVal kind As Long) As Boolean
     On Error GoTo ErrHandler
 
-10  If inDoc Then
-20      StampAllowedHere = (IsDoctorStamp(idx) Or idx = IDX_ERASE Or idx = IDX_CLEARFILL)
-30  Else
-40      StampAllowedHere = Not IsDoctorStamp(idx)
-50  End If
+10  If idx = IDX_ERASE Or idx = IDX_CLEARFILL Then
+20      StampAllowedHere = (kind <> TGT_NONE)
+30      Exit Function
+40  End If
+        Select Case kind
+            Case TGT_DOC
+                StampAllowedHere = IsDoctorStamp(idx)
+            Case TGT_NOTE
+                StampAllowedHere = IsNoteStamp(idx)
+            Case TGT_SHIFT
+                StampAllowedHere = Not IsDoctorStamp(idx) And Not IsNoteStamp(idx)
+            Case Else
+                StampAllowedHere = False
+        End Select
     Exit Function
 ErrHandler:
     LogError MODULE_NAME, "StampAllowedHere", Err.Number, Err.Description, Erl, _
-             "idx=" & idx & "; inDoc=" & inDoc
+             "idx=" & idx & "; kind=" & kind
     StampAllowedHere = False
+End Function
+
+'--- 押せない組み合わせのときの説明文 ---
+Private Function StampDeniedText(ByVal idx As Long, ByVal kind As Long) As String
+    On Error GoTo ErrHandler
+
+        Select Case kind
+            Case TGT_DOC
+                StampDeniedText = "医師名欄には医師名スタンプしか押せません。"
+            Case TGT_NOTE
+                StampDeniedText = "備考行には備考スタンプしか押せません。"
+            Case TGT_SHIFT
+                If IsDoctorStamp(idx) Then
+                    StampDeniedText = "医師名スタンプは医師名欄にだけ押せます。"
+                Else
+                    StampDeniedText = "備考スタンプは備考行にだけ押せます。"
+                End If
+            Case Else
+                StampDeniedText = "ここには押せません。"
+        End Select
+    Exit Function
+ErrHandler:
+    LogError MODULE_NAME, "StampDeniedText", Err.Number, Err.Description, Erl, _
+             "idx=" & idx & "; kind=" & kind
+    StampDeniedText = "ここには押せません。"
 End Function
 
 Private Function Triggered(ByVal EventKind As String, ByVal Trig As String) As Boolean
@@ -532,6 +578,11 @@ Private Sub ShowMode(ByVal ws As Worksheet, ByVal idx As Long)
                 s = "シフト入力マクロ: スタンプ [ " & _
                     Trim$(CStr(pal.Cells(1, idx).Value)) & " ]　" & _
                     op & "で押す／範囲を選んで右クリックでまとめて押す"
+                If IsDoctorStamp(idx) Then
+                    s = s & "　(医師名欄のみ)"
+                ElseIf IsNoteStamp(idx) Then
+                    s = s & "　(備考行のみ)"
+                End If
         End Select
 40  Application.StatusBar = s
     Exit Sub
@@ -557,20 +608,13 @@ End Sub
 ' 手動実行マクロ
 '==================================================================
 Public Sub ShiftClick_選択範囲にスタンプ()
-    Dim ws As Worksheet, area As Range, grid As Range, docBlk As Range
-    Dim inDoc As Boolean, idx As Long
+    Dim ws As Worksheet, area As Range
+    Dim kind As Long, idx As Long, stamped As Long
     On Error GoTo ErrHandler
 
 10  Set ws = ActiveSheet
 20  If Not TypeOf Selection Is Range Then Exit Sub
-30  Set grid = EditableRange(ws)
-35  Set docBlk = DoctorBlock(ws)
-40  If grid Is Nothing And docBlk Is Nothing Then
-50      MsgBox "シフト入力欄が特定できません。" & vbCrLf & _
-               "ShiftClick_セルフチェック で範囲を確認してください。", vbExclamation
-60      Exit Sub
-70  End If
-80  Set area = ClickTargetArea(ws, Selection, grid, docBlk, inDoc)
+80  Set area = ClickTargetArea(ws, Selection, kind)
 90  If area Is Nothing Then
 100     MsgBox "シフト入力欄・備考行・医師名欄のいずれかを" & vbCrLf & _
                "選んでから実行してください。", vbExclamation
@@ -584,21 +628,22 @@ Public Sub ShiftClick_選択範囲にスタンプ()
 160     Exit Sub
 170 End If
     '--- 記号の種類と書き込み先が噛み合わない組み合わせは拒否する ---
-175 If Not StampAllowedHere(idx, inDoc) Then
-176     MsgBox IIf(inDoc, "医師名欄には医師名スタンプしか押せません。", _
-                          "シフト入力欄には医師名スタンプは押せません。"), vbExclamation
+175 If Not StampAllowedHere(idx, kind) Then
+176     MsgBox StampDeniedText(idx, kind), vbExclamation
 177     Exit Sub
 178 End If
 
 180 Application.EnableEvents = False
+185 stamped = area.Cells.Count
 190 StampArea ws, area, idx
 
 CleanUp:
     On Error Resume Next
     Application.EnableEvents = True
     On Error GoTo 0
+    ' area が未設定のままここに来ることがあるため、件数は先に控えておく
     LogSuccess MODULE_NAME, "ShiftClick_選択範囲にスタンプ", _
-               "Stamped " & area.Cells.Count & " cells with palette index " & idx
+               "Stamped " & stamped & " cells with palette index " & idx
     Exit Sub
 
 ErrHandler:
@@ -779,7 +824,7 @@ Public Sub ShiftClick_セルフチェック()
           "　パレット本体行  : " & palRow & " 行(日付行の" & PALETTE_GAP & "行上)" & vbCrLf & _
           "パレットのセル数  : " & IIf(pal Is Nothing, 0, pal.Cells.Count) & vbCrLf & _
           "切替サイクル項目数: " & UBound(CycleValues(ws)) + 1 & _
-              IIf(CYCLE_INCLUDES_DOCTORS, "(医師名を含む)", "(医師名を除く)") & vbCrLf & _
+              "(シフト記号のみ)" & vbCrLf & _
           "現在のモード番号  : " & CurrentIndex(ws) & vbCrLf & warn & vbCrLf & _
           "ここまで表示されれば、標準モジュールは正しく入っています。"
 310 MsgBox msg, vbInformation, "ShiftClick セルフチェック"

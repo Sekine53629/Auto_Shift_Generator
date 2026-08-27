@@ -311,7 +311,8 @@ Private Function SV_WritePalette(ByVal rpt As Worksheet, ByVal ws As Worksheet, 
 170 r = SV_Row(rpt, r, Array("", "IDX_SYM_FIRST", IDX_SYM_FIRST))
 180 r = SV_Row(rpt, r, Array("", "IDX_SYM_LAST", IDX_SYM_LAST))
 190 r = SV_Row(rpt, r, Array("", "IDX_DOC_FIRST", IDX_DOC_FIRST))
-195 r = SV_Row(rpt, r, Array("", "IDX_DOC_LAST", IDX_DOC_LAST, "これより後ろは医師名ではない"))
+195 r = SV_Row(rpt, r, Array("", "IDX_DOC_LAST", IDX_DOC_LAST, "医師名の最終位置"))
+196 r = SV_Row(rpt, r, Array("", "IDX_NOTE_FIRST", IDX_NOTE_FIRST, "ここから先は備考スタンプ"))
 200 r = SV_Row(rpt, r, Array("", "パレットのセル数", pal.Cells.Count))
 210 r = r + 1
 
@@ -357,6 +358,8 @@ Private Function SV_PaletteRole(ByVal idx As Long) As String
             Case Else
                 If IsDoctorStamp(idx) Then
                     SV_PaletteRole = "医師名スタンプ"
+                ElseIf IsNoteStamp(idx) Then
+                    SV_PaletteRole = "備考スタンプ"
                 ElseIf idx >= IDX_SYM_FIRST And idx <= IDX_SYM_LAST Then
                     SV_PaletteRole = "出勤記号"
                 Else

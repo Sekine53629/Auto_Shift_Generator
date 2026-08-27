@@ -134,6 +134,14 @@ Public Const IDX_DOC_FIRST  As Long = 17  ' 医師名スタンプの開始位置
 Public Const DOC_SLOTS      As Long = 9   ' 医師名スタンプの数
 ' 医師名スタンプの最終位置。これより後ろ(銀行など)は医師名ではない
 Public Const IDX_DOC_LAST   As Long = IDX_DOC_FIRST + DOC_SLOTS - 1
+' 備考スタンプの開始位置。医師名の次からパレット末尾までが備考用
+Public Const IDX_NOTE_FIRST As Long = IDX_DOC_LAST + 1
+
+'--- 書き込み先の種別(クリック入力の判定に使う) ---
+Public Const TGT_NONE  As Long = 0   ' 書き込めない場所
+Public Const TGT_SHIFT As Long = 1   ' シフト入力欄(スタッフの行)
+Public Const TGT_NOTE  As Long = 2   ' 備考行
+Public Const TGT_DOC   As Long = 3   ' 医師名欄
 
 '--- ★マーカー(選択中のパレット位置を示す文字) ---
 Public Const MARKER_CHAR As String = "★"
@@ -248,6 +256,19 @@ ErrHandler:
     LogError MODULE_NAME, "IsDoctorStamp", Err.Number, Err.Description, Erl, _
              "idx=" & idx
     IsDoctorStamp = False
+End Function
+
+'--- そのパレット番号が備考スタンプか ---
+'    医師名の次からパレット末尾まで(銀行など)。備考行にしか押せない。
+Public Function IsNoteStamp(ByVal idx As Long) As Boolean
+    On Error GoTo ErrHandler
+
+10  IsNoteStamp = (idx >= IDX_NOTE_FIRST)
+    Exit Function
+ErrHandler:
+    LogError MODULE_NAME, "IsNoteStamp", Err.Number, Err.Description, Erl, _
+             "idx=" & idx
+    IsNoteStamp = False
 End Function
 
 '--- 早番記号か(○ と ◯ の入力揺れを吸収する) ---
