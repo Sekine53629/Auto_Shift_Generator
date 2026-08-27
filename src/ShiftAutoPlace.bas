@@ -1,7 +1,9 @@
 Option Explicit
 '==================================================================
-'  ShiftAutoPlace v9.11.0
+'  ShiftAutoPlace v9.11.1
 '  公休の配置・均等化アルゴリズムと後半工程。
+'  v9.11.1: FB_診断 の ok=0 を連勤側と連休側に分けた。cand=20/ok=0 と
+'          出たとき、どちらの上限を緩めれば届くかが分かるようにする。
 '  v9.11.0: ログに版を刻み、FiveBalance にも結果と詰まりを出させた。
 '          取り込めているのか動いていないのかを毎回切り分けられる。
 '  v9.10.0: FiveBalance に「混雑日を2人で交換する」手を追加。
@@ -54,7 +56,7 @@ Option Explicit
 Private Const MODULE_NAME As String = "ShiftAutoPlace"
 ' ログに刻む版。冒頭の版表記と必ず揃えること。
 ' 取り込み漏れで古い版が動いていないかを、ログだけで判別するために使う
-Private Const MODULE_VER As String = "v9.11.0"
+Private Const MODULE_VER As String = "v9.11.1"
 
 ' 候補選択の初期値(これより小さいカウントを探す)
 Private Const CNT_INF As Long = 32767
@@ -1538,10 +1540,14 @@ End Sub
 
 '--- 交換の候補が何組あり、何組が上限で消えたか(切り分け用) ---
 '    cand=0    そもそも交換できる日の組み合わせが無い
-'    cand>0 で ok=0  連勤・連休の上限で全部弾かれている
+'    cand>0 で ok=0  上限で全部弾かれている
+'    blkRun / blkOff  そのうち連勤側で消えた組・連休側で消えた組
+'    どちらを緩めれば届くかが分かる。連勤側が大半なら、不足を埋める
+'    ための上乗せが作った長い連勤が公平性の手を塞いでいる可能性が高い。
 Private Function FB_診断() As String
     Dim mxI As Long, mnI As Long, mxV As Long, mnV As Long
     Dim j As Long, k As Long, nCand As Long, nOk As Long
+    Dim nBlkR As Long, nBlkO As Long
     On Error GoTo ErrHandler
 
 10  FB_最多最少 mxI, mnI, mxV, mnV
@@ -1554,18 +1560,47 @@ Private Function FB_診断() As String
 80          For k = 1 To mND
 90              If FB_戻せる非混雑日か(mxI, mnI, k) Then
 100                 nCand = nCand + 1
-110                 If FB_2人で入替できるか(mxI, mnI, j, k) Then nOk = nOk + 1
+105                 If FB_2人で入替できるか(mxI, mnI, j, k) Then
+110                     nOk = nOk + 1
+112                 ElseIf FB_連勤で消えたか(mxI, mnI, j, k) Then
+114                     nBlkR = nBlkR + 1
+116                 Else
+118                     nBlkO = nBlkO + 1
+119                 End If
 120             End If
 130         Next k
 140     End If
 150 Next j
 160 FB_診断 = "top=" & mName(mxI) & "/" & mxV & "; bottom=" & mName(mnI) & "/" & mnV & _
-             "; cand=" & nCand & "; ok=" & nOk & "; runLimit=" & mMaxRun
+             "; cand=" & nCand & "; ok=" & nOk & _
+             "; blkRun=" & nBlkR & "; blkOff=" & nBlkO & "; runLimit=" & mMaxRun
     Exit Function
 ErrHandler:
     LogError MODULE_NAME, "FB_診断", Err.Number, Err.Description, Erl, _
              "j=" & j & "; k=" & k
     FB_診断 = "(diagnosis failed)"
+End Function
+
+'--- 入替が消えた理由が連勤側か(診断用。連休側と区別する) ---
+'    入れ替えた後の盤面で測る。戻したあとで測ると元の状態を見てしまう。
+Private Function FB_連勤で消えたか(ByVal hi As Long, ByVal lo As Long, _
+                                   ByVal j As Long, ByVal k As Long) As Boolean
+    Dim over As Boolean
+    On Error GoTo ErrHandler
+
+10  mPlan(hi, j) = ST_OFF: mPlan(hi, k) = ST_WORK
+20  mPlan(lo, j) = ST_WORK: mPlan(lo, k) = ST_OFF
+30  over = (WorkRunIf(hi, k) > mMaxRun) Or (WorkRunIf(lo, j) > mMaxRun)
+40  mPlan(hi, j) = ST_WORK: mPlan(hi, k) = ST_OFF
+50  mPlan(lo, j) = ST_OFF: mPlan(lo, k) = ST_WORK
+60  FB_連勤で消えたか = over
+    Exit Function
+ErrHandler:
+    mPlan(hi, j) = ST_WORK: mPlan(hi, k) = ST_OFF
+    mPlan(lo, j) = ST_OFF: mPlan(lo, k) = ST_WORK
+    LogError MODULE_NAME, "FB_連勤で消えたか", Err.Number, Err.Description, Erl, _
+             "hi=" & hi & "; lo=" & lo & "; j=" & j & "; k=" & k
+    FB_連勤で消えたか = False
 End Function
 
 '--- 混雑日の公休を出勤に変え、余裕のある非混雑日を休みにする ---
