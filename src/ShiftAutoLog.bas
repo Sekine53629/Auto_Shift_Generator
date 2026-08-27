@@ -1,11 +1,16 @@
 Option Explicit
 '==================================================================
-'  ShiftAutoLog v9.2.0
+'  ShiftAutoLog v9.3.0
 '  設定チェック・変更ログ・白紙化と共通の小物ヘルパ。
+'  v9.3.0: 期替わり判定(シフト期替わり確認)をシートモジュールから移管。
+'          スピンボタンから直接呼べるようにするため。
 '  ※ ShiftAuto / ShiftAutoPlace / ShiftAutoLog の3本で1組。
 '    共有状態は ShiftAuto の Public 変数に置く。
 '==================================================================
 Private Const MODULE_NAME As String = "ShiftAutoLog"
+
+'--- 期替わり判定の状態(シフト期替わり確認 が使う) ---
+Private mLastMonth As Date     ' 直前に見た対象月(0 = 未取得)
 
 
 
@@ -449,6 +454,60 @@ ErrHandler:
     LogError MODULE_NAME, "LogManualSession", Err.Number, Err.Description, Erl, "n=" & n
 End Sub
 
+
+'==================================================================
+' 期替わり(対象月の変更)の検出
+'   呼ばれる経路は3つ。どこから来ても年月が実際に変わったときだけ
+'   1回だけ問う。
+'     1) Worksheet_Change    … 年月セルに直接入力した場合
+'     2) Worksheet_Calculate … 数式の年月セルが再計算された場合
+'     3) スピンボタン        … Forms コントロールが LinkedCell に書く
+'                              経路は 1) を発生させず、2) も確実ではない。
+'                              ボタンにこのマクロを登録して直接呼ぶ。
+'   シートモジュールに置くとスピンボタンからシート名修飾でしか呼べず、
+'   シート名の変更に弱くなるため標準モジュールに置く。
+'==================================================================
+Public Sub シフト期替わり確認()
+    Dim ws As Worksheet, c As Range, d As Date
+    On Error GoTo ErrHandler
+
+10  Set ws = ShiftSheet()
+20  Set c = MonthCell(ws)
+30  If c Is Nothing Then Exit Sub
+40  If Not IsDate(c.Value) Then Exit Sub
+50  d = CDate(c.Value)
+
+    '--- 初回は記憶するだけ(ブックを開いた直後に問わない) ---
+60  If mLastMonth = 0 Then
+70      mLastMonth = d
+80      Exit Sub
+90  End If
+
+    '--- 年月の粒度で比較する(同月内の日付差では問わない) ---
+100 If Year(d) = Year(mLastMonth) And Month(d) = Month(mLastMonth) Then Exit Sub
+
+    '--- 問う前に更新する(「いいえ」の後に再計算で何度も問われないため) ---
+110 mLastMonth = d
+
+    '--- ログリセットの行削除が再帰的に Calculate を呼ぶため、先に止める ---
+120 Application.EnableEvents = False
+130 If MsgBox("対象月が変わりました。変更ログをリセットしますか?" & vbCrLf & _
+              "(前の期のログはすべて消去されます)", _
+              vbYesNo + vbQuestion, "期替わり") = vbYes Then
+140     シフトログリセット False
+150 End If
+
+CleanUp:
+    On Error Resume Next
+    Application.EnableEvents = True
+    On Error GoTo 0
+    Exit Sub
+
+ErrHandler:
+    LogError MODULE_NAME, "シフト期替わり確認", Err.Number, Err.Description, Erl, _
+             "lastMonth=" & Format(mLastMonth, "yyyy-mm")
+    Resume CleanUp
+End Sub
 
 '--- ログ全消去(期替わり用リセット) ---
 Public Sub シフトログリセット(Optional ByVal ask As Boolean = True)

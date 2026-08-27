@@ -1,13 +1,23 @@
 Option Explicit
 '==================================================================
 '  シフト表 クリック入力 + 手動変更ログ + 期替わりリセット
-'  ＜シートモジュール v2.2＞  2026-08-27
+'  ＜シートモジュール v2.3＞  2026-08-27
 '  ※シフト表のシート見出しを右クリック →「コードの表示」で開き、
 '    ここに貼り付けること(標準モジュールではない)
 '
 '  入力欄の範囲は ShiftCommon.ShiftInputRange が一元管理する。
 '  イベントは高頻度で発生するため LogSuccess は呼ばない
 '  (エラー時のみ LogError を記録する)。
+'
+'  v2.3 変更:
+'   ・期替わり判定を ShiftAutoLog.シフト期替わり確認 へ移管した。
+'     年月の元になる AG 列はスピンボタン(Forms コントロール)で
+'     動かしており、その書き込みは Change を発生させず、
+'     Calculate も確実ではない。ボタンにマクロを登録して直接
+'     呼べるようにするため、判定本体を標準モジュールへ移した。
+'     シートモジュールに置くとシート名修飾でしか呼べず、
+'     シート名の変更に弱くなる。
+'   ・Change / Calculate は委譲するだけになった。
 '
 '  v2.2 変更:
 '   ・MonthCellCached を廃止し、MonthCell を毎回呼ぶ形に戻した。
@@ -45,9 +55,6 @@ Private Const MODULE_NAME As String = "Sheet1"
 
 ' 一度に記録する変更セルの上限(全選択などの大量操作は記録対象外)
 Private Const MAX_CACHE_CELLS As Long = 200
-
-'--- 期替わり判定の状態 ---
-Private mLastMonth As Date     ' 直前に見た対象月(0 = 未取得)
 
 '--- 手動変更の記録用キャッシュ(選択時に変更前の状態を退避) ---
 Private mN As Long
@@ -99,54 +106,10 @@ End Sub
 Private Sub Worksheet_Calculate()
     On Error GoTo ErrHandler
 
-10  CheckMonthChanged
+10  シフト期替わり確認
     Exit Sub
 ErrHandler:
     LogError MODULE_NAME, "Worksheet_Calculate", Err.Number, Err.Description, Erl, ""
-End Sub
-
-'--- 対象月が変わっていたら、ログのリセットを促す ---
-'    Change と Calculate の両方から呼ばれる。実際に年月が変わったときだけ
-'    1回だけ問う。
-Private Sub CheckMonthChanged()
-    Dim c As Range, d As Date
-    On Error GoTo ErrHandler
-
-10  Set c = MonthCell(Me)
-20  If c Is Nothing Then Exit Sub
-30  If Not IsDate(c.Value) Then Exit Sub
-40  d = CDate(c.Value)
-
-    '--- 初回は記憶するだけ(ブックを開いた直後に問わない) ---
-50  If mLastMonth = 0 Then
-60      mLastMonth = d
-70      Exit Sub
-80  End If
-
-    '--- 年月の粒度で比較する(同月内の日付差では問わない) ---
-90  If Year(d) = Year(mLastMonth) And Month(d) = Month(mLastMonth) Then Exit Sub
-
-    '--- 問う前に更新する(「いいえ」の後に再計算で何度も問われないため) ---
-100 mLastMonth = d
-
-    '--- ログリセットの行削除が再帰的に Calculate を呼ぶため、先に止める ---
-110 Application.EnableEvents = False
-120 If MsgBox("対象月が変わりました。変更ログをリセットしますか?" & vbCrLf & _
-              "(前の期のログはすべて消去されます)", _
-              vbYesNo + vbQuestion, "期替わり") = vbYes Then
-130     シフトログリセット False
-140 End If
-
-CleanUp:
-    On Error Resume Next
-    Application.EnableEvents = True
-    On Error GoTo 0
-    Exit Sub
-
-ErrHandler:
-    LogError MODULE_NAME, "CheckMonthChanged", Err.Number, Err.Description, Erl, _
-             "lastMonth=" & Format(mLastMonth, "yyyy-mm")
-    Resume CleanUp
 End Sub
 
 '--- 値が変わった → 年月セルなら期替わりリセット確認 / 入力欄なら手動ログ記録 ---
@@ -159,7 +122,7 @@ Private Sub Worksheet_Change(ByVal Target As Range)
     '--- 年月セルに直接入力された場合の期替わり判定 ---
     '    実シートは数式なのでこの経路には来ないが、直接入力の運用に
     '    戻したときのために残す。実際に年月が変わったときだけ問う。
-5   CheckMonthChanged
+5   シフト期替わり確認
 
     '--- 入力欄の手動変更を記録 ---
 100 Set grid = EditableRange(Me)

@@ -58,7 +58,7 @@
 <tr><td><code>ErrorLogger</code></td><td>―</td><td>エラー／成功ログの出力（<code>C:\VBAErrorLogs\</code> にCSV）</td></tr>
 <tr><td><code>ShiftAuto</code><br>(AutoShiftGenerator)</td><td>v9.2.0</td><td>シフト自動作成の入口と前半工程（準備・メンバー読込・週リスト）</td></tr>
 <tr><td><code>ShiftAutoPlace</code></td><td>v9.2.0</td><td>公休の配置・均等化アルゴリズムと記号割当・書き込み・結果レポート</td></tr>
-<tr><td><code>ShiftAutoLog</code></td><td>v9.2.0</td><td>設定チェック・変更ログ・戻す・白紙化と共通ヘルパー</td></tr>
+<tr><td><code>ShiftAutoLog</code></td><td>v9.3.0</td><td>設定チェック・変更ログ・戻す・白紙化と共通ヘルパー</td></tr>
 <tr><td><code>ShiftClick</code></td><td>v9.3</td><td>クリック入力（パレットのモード切替・スタンプ・連続切替）</td></tr>
 <tr><td><code>ShiftSchema</code></td><td>v1.1</td><td>不足シート（自動作成設定／祝日マスタ／シフト変更ログ）の生成</td></tr>
 <tr><td><code>ShiftSetup</code></td><td>v2.4</td><td>シートの初期設定（パレット生成・集計行／集計列の数式・名前付き範囲）</td></tr>
@@ -337,6 +337,10 @@ STEP 7   手修正で仕上げ
 <tr><td><span class="macro">シフト白紙化</span></td><td>入力欄を全消去。これもログに記録され復元可能</td></tr>
 <tr><td><span class="macro">シフトログリセット</span></td><td>ログを全消去。<strong>実行後は過去に戻せなくなります</strong>（期替わり用）。<strong>対象月を変更すると自動で確認ダイアログ</strong>が出ます（年月セルは数式なので、その元になる <code>AG</code> 列の月数を書き換えたときに反応します）。<strong>ブックを開いてから最初の1回は出ません</strong>（開いた時点の月を記憶するだけ。次に月が変わったときから確認します）</td></tr>
 </table>
+
+<div class="warn">
+<strong>対象月をスピンボタンで変える場合は、ボタンにマクロを登録してください。</strong>スピンボタン（フォームコントロール）がリンクセルに書き込む操作は、Excel の変更イベントを発生させません。そのため期替わりの確認が出ないことがあります。<br><br>スピンボタンを<strong>右クリック → マクロの登録</strong>で <span class="macro">シフト期替わり確認</span> を選んでください。手入力で年月を変えた場合は登録が無くても確認が出ます。
+</div>
 
 <div class="info">
 「セッション」とは1回の操作単位です。自動作成1回・白紙化1回・手動での同時複数セル変更が、それぞれ1セッションになります。
