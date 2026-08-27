@@ -11,6 +11,7 @@
     5. モジュール間で重複する Public 名 ………… Ambiguous name detected
     6. エラーハンドラの無いプロシージャ ………… CLAUDE.md Tier 2 違反
     7. どこにも定義が無い識別子 ………………… コンパイルエラー
+    8. 宣言セクションの外にある宣言 …………… コンパイルエラー
 
     python3 tools/check_vba.py
 """
@@ -32,6 +33,9 @@ END = re.compile(r"^\s*End\s+(Sub|Function)\s*$")
 PUB_CONST = re.compile(r"^\s*Public\s+Const\s+(\w+)")
 ANY_CONST = re.compile(r"^\s*(?:Public|Private)\s+Const\s+(\w+)")
 MOD_VAR = re.compile(r"^\s*(?:Public|Private)\s+([A-Za-z_]\w*)(?:\(\))?\s+As\s")
+# モジュールレベルの宣言。VBA はこれを先頭の宣言セクションにしか置けない。
+MOD_DECL = re.compile(r"^\s*(?:Public|Private|Dim)\s+"
+                      r"(?:Const\s+\w+|[A-Za-z_]\w*(?:\(\))?\s+As\s)")
 LINENO = re.compile(r"^\s*\d+\s*")
 
 # プロジェクト固有の識別子だけを対象にする(VBA 組み込みは検査しない)
@@ -88,6 +92,23 @@ def check():
     for path in files:
         mod = path.stem
         lines = sources[mod].split("\n")
+
+        # 8. 宣言セクションの外にある宣言
+        #    プロシージャが1つでも現れた後の宣言はコンパイルエラーになる。
+        seen_proc = False
+        inside = False
+        for k, ln in enumerate(lines):
+            if PROC.match(ln):
+                seen_proc = True
+                inside = True
+                continue
+            if END.match(ln):
+                inside = False
+                continue
+            if not inside and seen_proc and MOD_DECL.match(ln):
+                problems.append(
+                    f"{mod}: 宣言セクションの外に宣言があります "
+                    f"(src/{path.name}:{k + 1}: {ln.strip()[:60]})")
 
         for ln in lines:
             m = PUB_CONST.match(ln)

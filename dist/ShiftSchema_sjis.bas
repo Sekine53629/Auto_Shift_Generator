@@ -29,6 +29,9 @@ Private Const FS_TITLE  As Long = 14
 Private Const FS_NOTE   As Long = 9
 Private Const FS_HEAD   As Long = 10
 
+'--- 入力規則(ドロップダウン)を設定する行数 ---
+Private Const MAX_VALIDATION_ROWS As Long = 200
+
 '--- 列幅 ---
 Private Const W_NAME    As Double = 24
 Private Const W_NORMAL  As Double = 14
@@ -414,8 +417,6 @@ End Sub
 
 '--- 列に入力規則(ドロップダウン)を設定する ---
 '    見出し行の1行下から下方向 MAX_VALIDATION_ROWS 行に適用
-Private Const MAX_VALIDATION_ROWS As Long = 200
-
 Private Sub SC_AddList(ByVal ws As Worksheet, ByVal colNo As Long, ByVal listCsv As String)
     Dim rng As Range
     On Error GoTo ErrHandler
