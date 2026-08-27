@@ -1,7 +1,11 @@
 Option Explicit
 '==================================================================
-'  ShiftAutoPlace v9.12.0
+'  ShiftAutoPlace v9.13.0
 '  公休の配置・均等化アルゴリズムと後半工程。
+'  v9.13.0: FiveBalance が最多と最少の1組しか試していなかったのを、
+'          差が2以上ある全ての組に広げた。実測で最多と最少の24組が
+'          すべて連勤で消え(blkRun=24)、そこで諦めていたが、間の人を
+'          経由すれば差は縮む。差の大きい組から順に試す。
 '  v9.12.0: 週N日と固定曜日が守られているかを結果レポートで検証する。
 '          守るための判定は各所に入れてあるが、守れているかを確かめる
 '          手段が無かった。マクロ自身の週の切り方(日曜起点)で数える。
@@ -59,7 +63,7 @@ Option Explicit
 Private Const MODULE_NAME As String = "ShiftAutoPlace"
 ' ログに刻む版。冒頭の版表記と必ず揃えること。
 ' 取り込み漏れで古い版が動いていないかを、ログだけで判別するために使う
-Private Const MODULE_VER As String = "v9.12.0"
+Private Const MODULE_VER As String = "v9.13.0"
 
 ' 候補選択の初期値(これより小さいカウントを探す)
 Private Const CNT_INF As Long = 32767
@@ -1561,6 +1565,8 @@ End Sub
 '    現版は (1)混雑日を2人で交換する手を先に試し、
 '          (2)最少の人を混雑日へ乗せ、
 '          (3)降ろす向きは、その日が必要数を保てるときだけ許す。
+'    (1)は最多と最少に限らず、差が2以上ある全ての組を差の大きい順に試す。
+'    最多と最少が連勤で塞がれても、間の人を経由すれば差は縮むため。
 '    (2)(3)は余裕のある日との入替に限るため、全日が不足している月では
 '    何も動かさない(カバレッジを優先し、個人差はそのまま残す)。
 Public Sub FiveBalance()
@@ -1577,7 +1583,7 @@ Public Sub FiveBalance()
 50      If mxI = 0 Or mnI = 0 Or mxI = mnI Then Exit For
 60      If mxV - mnV <= 1 Then Exit For
         '--- (1) 2人で交換する手を最優先。日別の人数を1人も動かさない ---
-70      If FB_同日で交換(mxI, mnI) Then
+70      If FB_どれかの組で交換() Then
 80          nSwap = nSwap + 1
         '--- (2) 届かなければ、余裕のある日を使う従来の手 ---
 90      ElseIf FB_混雑日へ乗せる(mnI) Then
@@ -1621,6 +1627,71 @@ ErrHandler:
     LogError MODULE_NAME, "FB_最多最少", Err.Number, Err.Description, Erl, "i=" & i
 End Sub
 
+'--- 混雑日の出勤回数を均す対象か(通常ルールの薬剤師のみ) ---
+Private Function FB_対象者か(ByVal i As Long) As Boolean
+    On Error GoTo ErrHandler
+
+10  If mSkipRow(i) Then Exit Function
+20  If mLeave(i) Then Exit Function
+30  If mKind(i) <> KIND_PH Then Exit Function
+40  If mRule(i) <> "通常" Then Exit Function
+50  FB_対象者か = True
+    Exit Function
+ErrHandler:
+    LogError MODULE_NAME, "FB_対象者か", Err.Number, Err.Description, Erl, "i=" & i
+    FB_対象者か = False
+End Function
+
+'--- 差が2以上ある組を、差の大きい順に試して1回交換する ---
+'    最多と最少だけを見ると、その組が連勤で塞がれた時点で諦めてしまう。
+'    実測で最多と最少の24組がすべて連勤で消えていた(blkRun=24)。
+'    間の人を経由すれば差は縮むので、全ての組を対象にする。
+'    差1の組は交換しても差が広がるだけなので2以上に限る。
+Private Function FB_どれかの組で交換() As Boolean
+    Dim d As Long, mxI As Long, mnI As Long, mxV As Long, mnV As Long
+    On Error GoTo ErrHandler
+
+10  FB_最多最少 mxI, mnI, mxV, mnV
+20  If mxI = 0 Or mnI = 0 Then Exit Function
+30  For d = mxV - mnV To 2 Step -1
+40      If FB_この差の組で交換(d) Then
+50          FB_どれかの組で交換 = True
+60          Exit Function
+70      End If
+80  Next d
+    Exit Function
+ErrHandler:
+    LogError MODULE_NAME, "FB_どれかの組で交換", Err.Number, Err.Description, Erl, _
+             "d=" & d
+    FB_どれかの組で交換 = False
+End Function
+
+'--- 出勤回数の差がちょうど d の組で交換を試す ---
+Private Function FB_この差の組で交換(ByVal d As Long) As Boolean
+    Dim a As Long, b As Long
+    On Error GoTo ErrHandler
+
+10  For a = 1 To mNP
+20      If FB_対象者か(a) Then
+30          For b = 1 To mNP
+40              If b <> a And FB_対象者か(b) Then
+50                  If FiveCnt(a) - FiveCnt(b) = d Then
+60                      If FB_同日で交換(a, b) Then
+70                          FB_この差の組で交換 = True
+80                          Exit Function
+90                      End If
+100                 End If
+110             End If
+120         Next b
+130     End If
+140 Next a
+    Exit Function
+ErrHandler:
+    LogError MODULE_NAME, "FB_この差の組で交換", Err.Number, Err.Description, Erl, _
+             "d=" & d & "; a=" & a & "; b=" & b
+    FB_この差の組で交換 = False
+End Function
+
 '--- 交換の候補が何組あり、何組が上限で消えたか(切り分け用) ---
 '    cand=0    そもそも交換できる日の組み合わせが無い
 '    cand>0 で ok=0  上限で全部弾かれている
@@ -1656,12 +1727,35 @@ Private Function FB_診断() As String
 150 Next j
 160 FB_診断 = "top=" & mName(mxI) & "/" & mxV & "; bottom=" & mName(mnI) & "/" & mnV & _
              "; cand=" & nCand & "; ok=" & nOk & _
-             "; blkRun=" & nBlkR & "; blkOff=" & nBlkO & "; runLimit=" & mMaxRun
+             "; blkRun=" & nBlkR & "; blkOff=" & nBlkO & _
+             "; pairs2=" & FB_差2以上の組数() & "; runLimit=" & mMaxRun
     Exit Function
 ErrHandler:
     LogError MODULE_NAME, "FB_診断", Err.Number, Err.Description, Erl, _
              "j=" & j & "; k=" & k
     FB_診断 = "(diagnosis failed)"
+End Function
+
+'--- 出勤回数の差が2以上ある組の数(まだ縮める余地があるかの目安) ---
+Private Function FB_差2以上の組数() As Long
+    Dim a As Long, b As Long, n As Long
+    On Error GoTo ErrHandler
+
+10  For a = 1 To mNP
+20      If FB_対象者か(a) Then
+30          For b = 1 To mNP
+40              If b <> a And FB_対象者か(b) Then
+50                  If FiveCnt(a) - FiveCnt(b) >= 2 Then n = n + 1
+60              End If
+70          Next b
+80      End If
+90  Next a
+100 FB_差2以上の組数 = n
+    Exit Function
+ErrHandler:
+    LogError MODULE_NAME, "FB_差2以上の組数", Err.Number, Err.Description, Erl, _
+             "a=" & a & "; b=" & b
+    FB_差2以上の組数 = 0
 End Function
 
 '--- 入替が消えた理由が連勤側か(診断用。連休側と区別する) ---
