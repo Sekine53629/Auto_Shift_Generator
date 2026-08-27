@@ -1,6 +1,6 @@
 Option Explicit
 '==================================================================
-'  シフト表 出力モジュール ＜標準モジュール ShiftExport v1.0＞
+'  シフト表 出力モジュール ＜標準モジュール ShiftExport v1.1＞
 '  2026-08-27
 '
 '  目的:
@@ -11,7 +11,14 @@ Option Explicit
 '             列は A 〜 EXPORT_COL_LAST(集計列まで)
 '             パレットの3行は範囲外なので出力されない
 '    内容   = 数式は値に変換する(元ブックが無くても崩れないため)
+'             条件付き書式の色は、見えている色を静的な塗りとして焼き込む
 '    ページ = 横向き / 横1ページ x 縦1ページに収める
+'
+'  v1.1 変更:
+'   ・土日祝の色が消える不具合を修正。
+'     xlPasteFormats は条件付き書式を運ばず、仮に運べても祝日マスタを
+'     参照する条件が新ブックでは壊れる。DisplayFormat から
+'     「実際に表示されている色」を読み取って焼き込む方式にした。
 '
 '  元のシートは一切書き換えない。新しいブックに複製してから加工する。
 '==================================================================
@@ -35,7 +42,7 @@ Public Sub ShiftExport_シフト表出力()
     Dim ws As Worksheet, src As Range
     Dim fmt As Long, path As String
     Dim newBk As Workbook, dst As Worksheet
-    Dim done As Boolean
+    Dim done As Boolean, savedCalc As XlCalculation
     On Error GoTo ErrHandler
 
 10  Set ws = ShiftSheet()
@@ -54,6 +61,8 @@ Public Sub ShiftExport_シフト表出力()
 100 If Len(path) = 0 Then Exit Sub
 
 110 Application.ScreenUpdating = False
+115 savedCalc = Application.Calculation
+116 Application.Calculation = xlCalculationManual
 
 120 Set newBk = XP_BuildBook(ws, src, dst)
 130 If newBk Is Nothing Then
@@ -74,6 +83,7 @@ CleanUp:
     On Error Resume Next
     Application.CutCopyMode = False
     If Not newBk Is Nothing Then newBk.Close SaveChanges:=False
+    If savedCalc <> 0 Then Application.Calculation = savedCalc
     Application.ScreenUpdating = True
     On Error GoTo 0
     ' 途中で中止した場合に成功として残さない
@@ -207,6 +217,9 @@ Private Function XP_BuildBook(ByVal ws As Worksheet, ByVal src As Range, _
 90      dst.Rows(i).RowHeight = src.Rows(i).RowHeight
 100 Next i
 
+    '--- 条件付き書式の色を静的な塗りとして焼き込む ---
+110 XP_BakeFormats src, dst
+
     ' Select はアクティブシートでないと失敗する。出力には不要なので行わない。
 120 Set XP_BuildBook = bk
     Exit Function
@@ -220,6 +233,37 @@ ErrHandler:
     On Error GoTo 0
     Set XP_BuildBook = Nothing
 End Function
+
+'--- 見えている色を静的な書式として焼き込む ---
+'    xlPasteFormats は条件付き書式を運ばない。運べたとしても、土日祝の
+'    条件は祝日マスタを参照しているため新ブックでは評価できない。
+'    DisplayFormat は条件付き書式を適用した後の「実際の見た目」を返すので、
+'    これを普通の塗り・文字色として書き込む。
+Private Sub XP_BakeFormats(ByVal src As Range, ByVal dst As Worksheet)
+    Dim r As Long, c As Long, sc As Range, dc As Range
+    On Error GoTo ErrHandler
+
+    '--- 条件付き書式そのものは持ち込まない(参照先が無く壊れるため) ---
+10  dst.Cells.FormatConditions.Delete
+
+20  For r = 1 To src.Rows.Count
+30      For c = 1 To src.Columns.Count
+40          Set sc = src.Cells(r, c)
+50          Set dc = dst.Cells(r, c)
+60          If sc.DisplayFormat.Interior.Pattern = xlNone Then
+70              dc.Interior.Pattern = xlNone
+80          Else
+90              dc.Interior.Color = sc.DisplayFormat.Interior.Color
+100         End If
+110         dc.Font.Color = sc.DisplayFormat.Font.Color
+120         dc.Font.Bold = sc.DisplayFormat.Font.Bold
+130     Next c
+140 Next r
+    Exit Sub
+ErrHandler:
+    LogError MODULE_NAME, "XP_BakeFormats", Err.Number, Err.Description, Erl, _
+             "r=" & r & "; c=" & c
+End Sub
 
 '--- 横向き / 横1 x 縦1 に収める ---
 Private Sub XP_SetPageSetup(ByVal dst As Worksheet)
