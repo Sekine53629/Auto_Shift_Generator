@@ -16,8 +16,9 @@
    10. 版を上げ忘れたモジュール ……………… どの版が動いているか分からなくなる
    11. 組み込み名と衝突する変数名 …………… コンパイルエラー
    12. プロシージャ内で重複する行番号 ………… コンパイルエラー
+   13. ログ用の版と冒頭の版のずれ ……………… ログで版を判別できなくなる
 
-    python3 tools/check_vba.py                     (検査1-9, 11, 12)
+    python3 tools/check_vba.py                     (検査1-9, 11-13)
     python3 tools/check_vba.py --base origin/main  (検査1-10)
 
 検査10だけは git の履歴を見る。--base を省いた場合は origin/main
@@ -330,6 +331,18 @@ def check(base=None):
                     problems.append(f"{mod}.{name}: On Error GoTo ErrHandler がありません")
                 if len([b for b in body if b.strip() == "ErrHandler:"]) != 1:
                     problems.append(f"{mod}.{name}: ErrHandler ラベルが1つではありません")
+
+    # 13. ログに刻む MODULE_VER が冒頭の版表記とずれていないか
+    #     ずれると「取り込めているか」の判別にログが使えなくなる
+    for mod, text in sorted(sources.items()):
+        m = re.search(r'MODULE_VER\s+As\s+String\s*=\s*"([^"]+)"', text)
+        if not m:
+            continue
+        head = re.search(r"'\s*" + re.escape(mod) + r"\s+(v[\d.]+)", text)
+        if head and head.group(1) != m.group(1):
+            problems.append(
+                f"{mod}: MODULE_VER({m.group(1)}) が冒頭の版({head.group(1)})と"
+                f"違います")
 
     # 9. マニュアルの版表記が実コードと合っているか
     #    マニュアルのモジュール表の「版」セルと、各モジュール冒頭の版を

@@ -1,8 +1,10 @@
 Attribute VB_Name = "ShiftAutoPlace"
 Option Explicit
 '==================================================================
-'  ShiftAutoPlace v9.10.0
+'  ShiftAutoPlace v9.11.0
 '  公休の配置・均等化アルゴリズムと後半工程。
+'  v9.11.0: ログに版を刻み、FiveBalance にも結果と詰まりを出させた。
+'          取り込めているのか動いていないのかを毎回切り分けられる。
 '  v9.10.0: FiveBalance に「混雑日を2人で交換する」手を追加。
 '          従来の2つの手はどちらも余裕のある日を必要とするため、
 '          CoverBalance が余裕を使い切った後は動けなかった。
@@ -51,6 +53,9 @@ Option Explicit
 '    共有状態は ShiftAuto の Public 変数に置く。
 '==================================================================
 Private Const MODULE_NAME As String = "ShiftAutoPlace"
+' ログに刻む版。冒頭の版表記と必ず揃えること。
+' 取り込み漏れで古い版が動いていないかを、ログだけで判別するために使う
+Private Const MODULE_VER As String = "v9.11.0"
 
 ' 候補選択の初期値(これより小さいカウントを探す)
 Private Const CNT_INF As Long = 32767
@@ -1057,8 +1062,8 @@ Public Sub CoverBalance()
 
     '--- 1手も動かないときに、どこで詰まっているかを残す ---
     LogSuccess MODULE_NAME, "CoverBalance", _
-               "score " & before & " -> " & CB_評価() & "; moves=" & moves & _
-               "; chains=" & chains & "; " & CB_診断()
+               MODULE_VER & "; score " & before & " -> " & CB_評価() & _
+               "; moves=" & moves & "; chains=" & chains & "; " & CB_診断()
     Exit Sub
 ErrHandler:
     LogError MODULE_NAME, "CoverBalance", Err.Number, Err.Description, Erl, _
@@ -1475,36 +1480,94 @@ End Sub
 '    (2)(3)は余裕のある日との入替に限るため、全日が不足している月では
 '    何も動かさない(カバレッジを優先し、個人差はそのまま残す)。
 Public Sub FiveBalance()
-    Dim pass As Long, i As Long, f As Long
+    Dim pass As Long
     Dim mxI As Long, mnI As Long, mxV As Long, mnV As Long
-    Dim swapped As Boolean
+    Dim v0Max As Long, v0Min As Long
+    Dim nSwap As Long, nLift As Long, nDrop As Long
     On Error GoTo ErrHandler
 
-10  For pass = 1 To FB_MAX_PASS
-20      mxI = 0: mnI = 0: mxV = -1: mnV = CNT_INF
-30      For i = 1 To mNP
-40          If Not mSkipRow(i) Then
-50          If mKind(i) = KIND_PH And Not mLeave(i) And mRule(i) = "通常" Then
-60              f = FiveCnt(i)
-70              If f > mxV Then mxV = f: mxI = i
-80              If f < mnV Then mnV = f: mnI = i
-90          End If
-100         End If
-110     Next i
-120     If mxI = 0 Or mnI = 0 Or mxI = mnI Then Exit Sub
-130     If mxV - mnV <= 1 Then Exit Sub
-    '--- (1) 2人で交換する手を最優先。日別の人数を1人も動かさない ---
-140     swapped = FB_同日で交換(mxI, mnI)
-    '--- (2) 届かなければ、余裕のある日を使う従来の手 ---
-150     If Not swapped Then swapped = FB_混雑日へ乗せる(mnI)
-155     If Not swapped Then swapped = FB_混雑日から降ろす(mxI)
-160     If Not swapped Then Exit Sub
-170 Next pass
+10  FB_最多最少 mxI, mnI, mxV, mnV
+20  v0Max = mxV: v0Min = mnV
+30  For pass = 1 To FB_MAX_PASS
+40      FB_最多最少 mxI, mnI, mxV, mnV
+50      If mxI = 0 Or mnI = 0 Or mxI = mnI Then Exit For
+60      If mxV - mnV <= 1 Then Exit For
+        '--- (1) 2人で交換する手を最優先。日別の人数を1人も動かさない ---
+70      If FB_同日で交換(mxI, mnI) Then
+80          nSwap = nSwap + 1
+        '--- (2) 届かなければ、余裕のある日を使う従来の手 ---
+90      ElseIf FB_混雑日へ乗せる(mnI) Then
+100         nLift = nLift + 1
+110     ElseIf FB_混雑日から降ろす(mxI) Then
+120         nDrop = nDrop + 1
+130     Else
+140         Exit For
+150     End If
+160 Next pass
+
+    LogSuccess MODULE_NAME, "FiveBalance", _
+               MODULE_VER & "; gap " & v0Max & "-" & v0Min & " -> " & mxV & "-" & mnV & _
+               "; swaps=" & nSwap & "; lifts=" & nLift & "; drops=" & nDrop & _
+               "; " & FB_診断()
     Exit Sub
 ErrHandler:
     LogError MODULE_NAME, "FiveBalance", Err.Number, Err.Description, Erl, _
              "pass=" & pass & "; maxIdx=" & mxI & "; minIdx=" & mnI
 End Sub
+
+'--- 混雑日の出勤回数が最多・最少の人(通常ルールの薬剤師のみ) ---
+'    固定曜日と週N日は出勤日が別のルールで決まるため対象にしない。
+Private Sub FB_最多最少(ByRef mxI As Long, ByRef mnI As Long, _
+                        ByRef mxV As Long, ByRef mnV As Long)
+    Dim i As Long, f As Long
+    On Error GoTo ErrHandler
+
+10  mxI = 0: mnI = 0: mxV = -1: mnV = CNT_INF
+20  For i = 1 To mNP
+30      If Not mSkipRow(i) Then
+40      If mKind(i) = KIND_PH And Not mLeave(i) And mRule(i) = "通常" Then
+50          f = FiveCnt(i)
+60          If f > mxV Then mxV = f: mxI = i
+70          If f < mnV Then mnV = f: mnI = i
+80      End If
+90      End If
+100 Next i
+    Exit Sub
+ErrHandler:
+    LogError MODULE_NAME, "FB_最多最少", Err.Number, Err.Description, Erl, "i=" & i
+End Sub
+
+'--- 交換の候補が何組あり、何組が上限で消えたか(切り分け用) ---
+'    cand=0    そもそも交換できる日の組み合わせが無い
+'    cand>0 で ok=0  連勤・連休の上限で全部弾かれている
+Private Function FB_診断() As String
+    Dim mxI As Long, mnI As Long, mxV As Long, mnV As Long
+    Dim j As Long, k As Long, nCand As Long, nOk As Long
+    On Error GoTo ErrHandler
+
+10  FB_最多最少 mxI, mnI, mxV, mnV
+20  If mxI = 0 Or mnI = 0 Or mxI = mnI Then
+30      FB_診断 = "cand=n/a"
+40      Exit Function
+50  End If
+60  For j = 1 To mND
+70      If FB_渡せる混雑日か(mxI, mnI, j) Then
+80          For k = 1 To mND
+90              If FB_戻せる非混雑日か(mxI, mnI, k) Then
+100                 nCand = nCand + 1
+110                 If FB_2人で入替できるか(mxI, mnI, j, k) Then nOk = nOk + 1
+120             End If
+130         Next k
+140     End If
+150 Next j
+160 FB_診断 = "top=" & mName(mxI) & "/" & mxV & "; bottom=" & mName(mnI) & "/" & mnV & _
+             "; cand=" & nCand & "; ok=" & nOk & "; runLimit=" & mMaxRun
+    Exit Function
+ErrHandler:
+    LogError MODULE_NAME, "FB_診断", Err.Number, Err.Description, Erl, _
+             "j=" & j & "; k=" & k
+    FB_診断 = "(diagnosis failed)"
+End Function
 
 '--- 混雑日の公休を出勤に変え、余裕のある非混雑日を休みにする ---
 Private Function FB_混雑日へ乗せる(ByVal i As Long) As Boolean
