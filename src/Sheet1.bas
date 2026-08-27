@@ -1,13 +1,28 @@
 Option Explicit
 '==================================================================
 '  シフト表 クリック入力 + 手動変更ログ + 期替わりリセット
-'  ＜シートモジュール v2.0＞  2026-08-27
+'  ＜シートモジュール v2.1＞  2026-08-27
 '  ※シフト表のシート見出しを右クリック →「コードの表示」で開き、
 '    ここに貼り付けること(標準モジュールではない)
 '
 '  入力欄の範囲は ShiftCommon.ShiftInputRange が一元管理する。
 '  イベントは高頻度で発生するため LogSuccess は呼ばない
 '  (エラー時のみ LogError を記録する)。
+'
+'  v2.1 変更:
+'   ・Worksheet_Calculate を追加。期替わり判定が発火していなかった。
+'     年月セル(A4)は =DATE(1900,AG4,1) の数式で、利用者が触るのは AG4。
+'     数式セルの再計算では Change は起きず Calculate だけが起きるが、
+'     その Calculate が未実装だったため、どちらの経路でも到達しなかった。
+'   ・判定を CheckMonthChanged に集約し、Change / Calculate の両方から呼ぶ
+'     Calculate はシート上のどの再計算でも走るので、
+'       - 年月の粒度で比較する(同月内の日付差では問わない)
+'       - 初回は記憶するだけ(ブックを開いた直後に問わない)
+'       - 問う前に記憶を更新する(「いいえ」の後に何度も問われない)
+'       - MsgBox の前に EnableEvents を落とす
+'         (ログリセットの行削除が再帰的に Calculate を呼ぶため)
+'   ・MonthCellCached を追加。MonthCell は最大200行を走査するため、
+'     再計算のたびに呼ぶとスタンプ操作が重くなる。位置を覚えて使い回す。
 '
 '  v2.0 変更:
 '   ・期替わり判定の対象セルを Me.Range("A1") 固定から
@@ -19,6 +34,10 @@ Private Const MODULE_NAME As String = "Sheet1"
 
 ' 一度に記録する変更セルの上限(全選択などの大量操作は記録対象外)
 Private Const MAX_CACHE_CELLS As Long = 200
+
+'--- 期替わり判定の状態 ---
+Private mLastMonth As Date     ' 直前に見た対象月(0 = 未取得)
+Private mMonthAddr As String   ' 対象月セルの位置(毎回探さないため)
 
 '--- 手動変更の記録用キャッシュ(選択時に変更前の状態を退避) ---
 Private mN As Long
@@ -64,30 +83,97 @@ ErrHandler:
              "target=" & Target.Address(False, False)
 End Sub
 
+'--- 再計算された → 対象月が変わっていないか見る ---
+'    年月セルが数式(=DATE(1900,AG4,1))のため、AG4 を書き換えても
+'    Change ではなくこちらが呼ばれる。
+Private Sub Worksheet_Calculate()
+    On Error GoTo ErrHandler
+
+10  CheckMonthChanged
+    Exit Sub
+ErrHandler:
+    LogError MODULE_NAME, "Worksheet_Calculate", Err.Number, Err.Description, Erl, ""
+End Sub
+
+'--- 対象月が変わっていたら、ログのリセットを促す ---
+'    Change と Calculate の両方から呼ばれる。実際に年月が変わったときだけ
+'    1回だけ問う。
+Private Sub CheckMonthChanged()
+    Dim c As Range, d As Date
+    On Error GoTo ErrHandler
+
+10  Set c = MonthCellCached()
+20  If c Is Nothing Then Exit Sub
+30  If Not IsDate(c.Value) Then Exit Sub
+40  d = CDate(c.Value)
+
+    '--- 初回は記憶するだけ(ブックを開いた直後に問わない) ---
+50  If mLastMonth = 0 Then
+60      mLastMonth = d
+70      Exit Sub
+80  End If
+
+    '--- 年月の粒度で比較する(同月内の日付差では問わない) ---
+90  If Year(d) = Year(mLastMonth) And Month(d) = Month(mLastMonth) Then Exit Sub
+
+    '--- 問う前に更新する(「いいえ」の後に再計算で何度も問われないため) ---
+100 mLastMonth = d
+
+    '--- ログリセットの行削除が再帰的に Calculate を呼ぶため、先に止める ---
+110 Application.EnableEvents = False
+120 If MsgBox("対象月が変わりました。変更ログをリセットしますか?" & vbCrLf & _
+              "(前の期のログはすべて消去されます)", _
+              vbYesNo + vbQuestion, "期替わり") = vbYes Then
+130     シフトログリセット False
+140 End If
+
+CleanUp:
+    On Error Resume Next
+    Application.EnableEvents = True
+    On Error GoTo 0
+    Exit Sub
+
+ErrHandler:
+    LogError MODULE_NAME, "CheckMonthChanged", Err.Number, Err.Description, Erl, _
+             "lastMonth=" & Format(mLastMonth, "yyyy-mm")
+    Resume CleanUp
+End Sub
+
+'--- 対象月セル(位置は一度だけ解決して覚える) ---
+'    MonthCell は B列を最大200行走査するため、再計算のたびに呼ぶと
+'    スタンプ1回ごとにその走査が入る。覚えた位置が日付でなくなったら
+'    そのときだけ探し直す。
+Private Function MonthCellCached() As Range
+    On Error GoTo ErrHandler
+
+10  If Len(mMonthAddr) > 0 Then
+20      Set MonthCellCached = Me.Range(mMonthAddr)
+30      If IsDate(MonthCellCached.Value) Then Exit Function
+40  End If
+50  Set MonthCellCached = MonthCell(Me)
+60  If Not MonthCellCached Is Nothing Then
+70      mMonthAddr = MonthCellCached.Address(False, False)
+80  End If
+    Exit Function
+
+ErrHandler:
+    LogError MODULE_NAME, "MonthCellCached", Err.Number, Err.Description, Erl, _
+             "addr=" & mMonthAddr
+    mMonthAddr = ""
+    Set MonthCellCached = Nothing
+End Function
+
 '--- 値が変わった → 年月セルなら期替わりリセット確認 / 入力欄なら手動ログ記録 ---
 Private Sub Worksheet_Change(ByVal Target As Range)
     Dim g As Range, grid As Range, k As Long, hit As Long
     Dim aAddrs() As String, aVals() As String, aFonts() As Long
     Dim aBolds() As Boolean, aFills() As Variant
-    Dim mc As Range
     On Error GoTo ErrHandler
 
-    '--- 年月セル(実シートはA4)の変更 = 期替わり → ログリセット確認 ---
-    '    位置は ShiftCommon.MonthCell が解決する(A1固定にしない)
-5   Set mc = MonthCell(Me)
-10  If Not mc Is Nothing Then
-15  If Not Application.Intersect(Target, mc) Is Nothing Then
-20      If IsDate(mc.Value) Then
-30          If MsgBox("対象月が変わりました。変更ログをリセットしますか?" & vbCrLf & _
-                      "(前の期のログはすべて消去されます)", _
-                      vbYesNo + vbQuestion, "期替わり") = vbYes Then
-40              Application.EnableEvents = False
-50              シフトログリセット False
-60              Application.EnableEvents = True
-70          End If
-80      End If
-85  End If
-90  End If
+    '--- 年月セルに直接入力された場合の期替わり判定 ---
+    '    実シートは数式なのでこの経路には来ないが、直接入力の運用に
+    '    戻したときのために残す。実際に年月が変わったときだけ問う。
+5   CheckMonthChanged
 
     '--- 入力欄の手動変更を記録 ---
 100 Set grid = EditableRange(Me)
