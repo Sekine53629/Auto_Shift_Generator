@@ -100,6 +100,7 @@ Public Sub ShiftClick_Handle(ByVal Target As Range, _
                              ByVal EventKind As String, _
                              ByRef Handled As Boolean)
     Dim ws As Worksheet, pal As Range, area As Range, grid As Range
+    Dim docBlk As Range, inDoc As Boolean
     Dim idx As Long, palIdx As Long
     On Error GoTo ErrHandler
 
@@ -127,10 +128,10 @@ Public Sub ShiftClick_Handle(ByVal Target As Range, _
 170     Exit Sub
 180 End If
 
-    '--- シフト入力範囲との交差判定 ---
+    '--- 書き込み先の判定: スタッフ入力欄 または 医師名欄 ---
 190 Set grid = ShiftInputRange(ws)
-200 If grid Is Nothing Then Exit Sub
-210 Set area = Application.Intersect(ClickRange(Target, EventKind), grid)
+200 Set docBlk = DoctorBlock(ws)
+210 Set area = ClickTargetArea(ws, ClickRange(Target, EventKind), grid, docBlk, inDoc)
 220 If area Is Nothing Then Exit Sub
 230 If Application.CutCopyMode <> False Then Exit Sub
 
@@ -138,6 +139,8 @@ Public Sub ShiftClick_Handle(ByVal Target As Range, _
 250 If idx = IDX_OFF Then Exit Sub
     '--- 「自動」がモードとして残っていても入力欄では何もしない ---
 260 If idx = IDX_AUTO Then Exit Sub
+    '--- 記号の種類と書き込み先が噛み合わない組み合わせは無視する ---
+265 If Not StampAllowedHere(idx, inDoc) Then Exit Sub
 
 270 Application.EnableEvents = False
 280 If idx = IDX_CYCLE Then
@@ -254,6 +257,49 @@ End Sub
 '==================================================================
 ' 内部処理
 '==================================================================
+'--- クリック先がスタッフ入力欄か医師名欄かを判定して対象範囲を返す ---
+'    どちらでもなければ Nothing。inDoc は医師名欄だったかを返す。
+Private Function ClickTargetArea(ByVal ws As Worksheet, ByVal clicked As Range, _
+                                 ByVal grid As Range, ByVal docBlk As Range, _
+                                 ByRef inDoc As Boolean) As Range
+    On Error GoTo ErrHandler
+
+10  inDoc = False
+20  If Not grid Is Nothing Then
+30      Set ClickTargetArea = Application.Intersect(clicked, grid)
+40      If Not ClickTargetArea Is Nothing Then Exit Function
+50  End If
+60  If Not docBlk Is Nothing Then
+70      Set ClickTargetArea = Application.Intersect(clicked, docBlk)
+80      If Not ClickTargetArea Is Nothing Then inDoc = True
+90  End If
+    Exit Function
+ErrHandler:
+    LogError MODULE_NAME, "ClickTargetArea", Err.Number, Err.Description, Erl, _
+             "clicked=" & clicked.Address(False, False)
+    Set ClickTargetArea = Nothing
+End Function
+
+'--- その記号をその場所に押してよいか ---
+'    医師名欄  : 医師名スタンプ / 消去 / 色消 のみ
+'    入力欄    : 医師名スタンプ以外
+'    (医師名欄に ○▲ が入ると医師数の COUNTA がずれ、入力欄に医師名が入ると
+'     出勤記号として数えられないため、両方向で弾く)
+Private Function StampAllowedHere(ByVal idx As Long, ByVal inDoc As Boolean) As Boolean
+    On Error GoTo ErrHandler
+
+10  If inDoc Then
+20      StampAllowedHere = (idx >= IDX_DOC_FIRST Or idx = IDX_ERASE Or idx = IDX_CLEARFILL)
+30  Else
+40      StampAllowedHere = (idx < IDX_DOC_FIRST)
+50  End If
+    Exit Function
+ErrHandler:
+    LogError MODULE_NAME, "StampAllowedHere", Err.Number, Err.Description, Erl, _
+             "idx=" & idx & "; inDoc=" & inDoc
+    StampAllowedHere = False
+End Function
+
 Private Function Triggered(ByVal EventKind As String, ByVal Trig As String) As Boolean
     On Error GoTo ErrHandler
 10  If EventKind = "double" Then
@@ -511,21 +557,22 @@ End Sub
 ' 手動実行マクロ
 '==================================================================
 Public Sub ShiftClick_選択範囲にスタンプ()
-    Dim ws As Worksheet, area As Range, grid As Range, idx As Long
+    Dim ws As Worksheet, area As Range, grid As Range, docBlk As Range
+    Dim inDoc As Boolean, idx As Long
     On Error GoTo ErrHandler
 
 10  Set ws = ActiveSheet
 20  If Not TypeOf Selection Is Range Then Exit Sub
 30  Set grid = ShiftInputRange(ws)
-40  If grid Is Nothing Then
+35  Set docBlk = DoctorBlock(ws)
+40  If grid Is Nothing And docBlk Is Nothing Then
 50      MsgBox "シフト入力欄が特定できません。" & vbCrLf & _
                "ShiftClick_セルフチェック で範囲を確認してください。", vbExclamation
 60      Exit Sub
 70  End If
-80  Set area = Application.Intersect(Selection, grid)
+80  Set area = ClickTargetArea(ws, Selection, grid, docBlk, inDoc)
 90  If area Is Nothing Then
-100     MsgBox "シフト入力欄(" & grid.Address(False, False) & _
-               ")を選んでから実行してください。", vbExclamation
+100     MsgBox "シフト入力欄または医師名欄を選んでから実行してください。", vbExclamation
 110     Exit Sub
 120 End If
 130 idx = CurrentIndex(ws)
@@ -535,6 +582,12 @@ Public Sub ShiftClick_選択範囲にスタンプ()
                "実行してください。", vbExclamation
 160     Exit Sub
 170 End If
+    '--- 記号の種類と書き込み先が噛み合わない組み合わせは拒否する ---
+175 If Not StampAllowedHere(idx, inDoc) Then
+176     MsgBox IIf(inDoc, "医師名欄には医師名スタンプしか押せません。", _
+                          "シフト入力欄には医師名スタンプは押せません。"), vbExclamation
+177     Exit Sub
+178 End If
 
 180 Application.EnableEvents = False
 190 StampArea ws, area, idx
