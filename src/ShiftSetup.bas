@@ -1,9 +1,16 @@
 Option Explicit
 '==================================================================
-'  シフト表 初期設定マクロ ＜標準モジュール ShiftSetup v3.0＞
-'  2026-08-27
+'  シフト表 初期設定マクロ ＜標準モジュール ShiftSetup v3.1＞
+'  2026-08-28
 '  ShiftCommon / ShiftSchema / ShiftClick と併用。
 '  シート上の位置はすべて ShiftCommon が解決する。
+'
+'  v3.1: 集計列に「ノルマ休」(AM)を追加。AH「休」は公休・希休・夏休・
+'        有休・有休※を全部足した総数で、公休ノルマを満たしているかの
+'        判定には使えない。ノルマに数える休みだけを別に数える。
+'        どの記号がノルマ外かは設定シート L11 に従う。
+'        初期設定実行の完了メッセージに ShiftSchema_設定差分 を足した。
+'        パレット定義のコメントが IDX_* 定数と食い違っていたのを直した。
 '
 '  v3.0: 祝日サマリーの文言を「休みのトータル」から「公休ノルマ」に変更。
 '        この値(土日+平日の祝日)は自動作成が使う公休ノルマそのものだが、
@@ -72,7 +79,7 @@ Private Const MODULE_NAME As String = "ShiftSetup"
 '--------------------------- 設定 ---------------------------------
 ' 集計列(このモジュール専用)
 Private Const COL_AGG       As String = "AH"  ' 集計列の先頭
-Private Const COL_AGG_END   As String = "AL"  ' 集計列の最終
+Private Const COL_AGG_END   As String = "AM"  ' 集計列の最終
 Private Const COL_MONTH     As String = "AG"  ' 年月シリアルの置き場
 Private Const COL_HOL_SUMM  As String = "I"   ' 祝日サマリーの置き場
 
@@ -102,13 +109,14 @@ Private Const FS_TITLE  As Long = 14
 '==================================================================
 '  パレット定義
 '  ShiftCommon の IDX_* と必ず一致させること。
-'    1 OFF   2 自動   3 切替   4 色消
-'    5 背景緑 6 背景橙 7 背景灰   ← 値は空。背景色のみ持つ
-'    8 消去
-'    9 ○  10 ●  11 ▲
-'   12 公休 13 希休 14 夏休 15 有休 16 有休※
-'   17-25 医師名   ← 設定シートから読む。無ければ "医師1".."医師9"
-'   26 銀行
+'    1 OFF   2 自動   3 戻す   4 出力   5 切替   6 色消
+'    7 背景緑 8 背景橙 9 背景灰   ← 値は空。背景色のみ持つ
+'   10 消去                        ← 値は空
+'   11 ○  12 ●  13 ▲
+'   14 公休 15 希休 16 夏休 17 有休 18 有休※
+'   19-28 医師名   ← DOC_SLOTS(10)個。シフト表の医師名欄から読む
+'   29 銀行
+'  合計 18 + DOC_SLOTS + 1 = 29 項目 (B列から AD列まで)
 '
 '  ※医師名は個人情報のためコードに実名を書かない。
 '    シフトシートの医師名欄に既に入っている値を優先して読む。
@@ -252,7 +260,7 @@ End Function
 Private Function SS_AggHeads() As Variant
     On Error GoTo ErrHandler
     SS_AggHeads = Array("休", "○早番", "▲遅番", "●遅半", _
-                        DOC_BUSY_N & "診出勤")
+                        DOC_BUSY_N & "診出勤", "ノルマ休")
     Exit Function
 ErrHandler:
     LogError MODULE_NAME, "SS_AggHeads", Err.Number, Err.Description, Erl, ""
@@ -265,6 +273,56 @@ Private Function SS_OffSyms() As Variant
     Exit Function
 ErrHandler:
     LogError MODULE_NAME, "SS_OffSyms", Err.Number, Err.Description, Erl, ""
+End Function
+
+'--- 集計列「ノルマ休」に数える記号 ---
+'    SS_OffSyms から、設定シート L11「ノルマ外の休み記号」に当たるものを
+'    除いたもの。判定は ShiftAutoLog.IsPaidOff と同じ部分一致なので、
+'    L11 に「有休」とだけ書けば「有休※」も外れる。
+'    設定シートが無いときは PAID_OFF_DEFAULT を使う。
+Private Function SS_QuotaOffSyms() As Variant
+    On Error GoTo ErrHandler
+    Dim cfg As Worksheet, paid As String, parts() As String
+    Dim syms As Variant, arr() As String, i As Long, p As Long
+    Dim n As Long, isPaid As Boolean
+
+10  Set cfg = SheetOrNothing(SHT_CFG)
+20  If cfg Is Nothing Then
+30      paid = PAID_OFF_DEFAULT
+40  Else
+50      paid = CfgTxt(cfg, "ノルマ外", PAID_OFF_DEFAULT)
+60  End If
+70  parts = Split(Replace(paid, "、", ","), ",")
+
+80  syms = SS_OffSyms()
+90  ReDim arr(LBound(syms) To UBound(syms))
+100 For i = LBound(syms) To UBound(syms)
+110     isPaid = False
+120     For p = LBound(parts) To UBound(parts)
+130         If Len(Trim$(parts(p))) > 0 Then
+140             If InStr(CStr(syms(i)), Trim$(parts(p))) > 0 Then isPaid = True
+150         End If
+160     Next p
+170     If Not isPaid Then
+180         arr(n) = CStr(syms(i))
+190         n = n + 1
+200     End If
+210 Next i
+
+    '--- 全部がノルマ外のときは数式を作れないので公休だけ残す ---
+220 If n = 0 Then
+230     ReDim arr(0 To 0): arr(0) = SYM_OFF: n = 1
+240 End If
+250 ReDim Preserve arr(0 To n - 1)
+260 SS_QuotaOffSyms = arr
+
+    LogSuccess MODULE_NAME, "SS_QuotaOffSyms", _
+               "Quota-counted off symbols: " & Join(arr, "/") & " (paid=" & paid & ")"
+    Exit Function
+ErrHandler:
+    LogError MODULE_NAME, "SS_QuotaOffSyms", Err.Number, Err.Description, Erl, _
+             "paid=" & paid & "; i=" & i
+    SS_QuotaOffSyms = Array(SYM_OFF)
 End Function
 
 '--- 集計列「出勤」に数える記号 ---
@@ -678,7 +736,7 @@ End Function
 Public Sub ShiftSetup_集計列数式()
     Dim ws As Worksheet, topR As Long, botR As Long, hdrRow As Long
     Dim docRow As Long, aggCol As Long, r As Long, i As Long
-    Dim heads As Variant, rng As Range
+    Dim heads As Variant, rng As Range, quotaSyms As Variant
     On Error GoTo ErrHandler
 
 10  Set ws = ShiftSheet()
@@ -693,6 +751,8 @@ Public Sub ShiftSetup_集計列数式()
 90  hdrRow = topR - 1
 100 aggCol = ws.Range(COL_AGG & "1").Column
 110 heads = SS_AggHeads()
+    '--- ノルマ休が数える記号は全行で同じ。行ごとに設定を読み直さない ---
+115 quotaSyms = SS_QuotaOffSyms()
 
 120 Application.EnableEvents = False
 130 Application.ScreenUpdating = False
@@ -717,6 +777,7 @@ Public Sub ShiftSetup_集計列数式()
 240         ws.Cells(r, aggCol + 2).Formula = SS_CountFormula(r, Array("▲"))
 250         ws.Cells(r, aggCol + 3).Formula = SS_CountFormula(r, Array("●"))
 260         ws.Cells(r, aggCol + 4).Formula = SS_BusyDayFormula(r, docRow)
+265         ws.Cells(r, aggCol + 5).Formula = SS_CountFormula(r, quotaSyms)
 270     End If
 280 Next r
 
@@ -1104,6 +1165,8 @@ Public Sub ShiftSetup_初期設定実行()
           "シフト入力範囲  : " & COL_FIRST & topR & ":" & COL_LAST & botR & vbCrLf & _
           "集計行          : " & ShiftDocRow(ws) & "-" & (ShiftDocRow(ws) + 2) & " 行" & vbCrLf & _
           "集計列          : " & COL_AGG & "-" & COL_AGG_END
+    '--- 既存ブックに取り残された古い設定を知らせる(書き換えはしない) ---
+185 msg = msg & vbCrLf & ShiftSchema_設定差分()
 190 MsgBox msg, vbInformation, "初期設定"
 
 CleanUp:

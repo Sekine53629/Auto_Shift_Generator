@@ -1,8 +1,12 @@
 Attribute VB_Name = "ShiftExport"
 Option Explicit
 '==================================================================
-'  シフト表 出力モジュール ＜標準モジュール ShiftExport v1.1＞
-'  2026-08-27
+'  シフト表 出力モジュール ＜標準モジュール ShiftExport v1.2＞
+'  2026-08-28
+'
+'  v1.2: 集計列に「ノルマ休」(AM)が増えたので出力の最終列を AM にした。
+'        ここは「集計列まで出す」意図の定数なので、集計列を伸ばしたら
+'        合わせて伸ばさないと新しい列だけ印刷から欠ける。
 '
 '  目的:
 '    印刷・配布用にシフト表を切り出して、PDF または Excel で保存する。
@@ -25,8 +29,9 @@ Option Explicit
 '==================================================================
 Private Const MODULE_NAME As String = "ShiftExport"
 
-'--- 出力する最終列(集計列 AL まで含める) ---
-Private Const EXPORT_COL_LAST As String = "AL"
+'--- 出力する最終列(集計列 AM まで含める) ---
+'    ShiftSetup の COL_AGG_END と合わせること
+Private Const EXPORT_COL_LAST As String = "AM"
 
 '--- 余白(cm) ---
 Private Const MARGIN_CM As Double = 0.6
