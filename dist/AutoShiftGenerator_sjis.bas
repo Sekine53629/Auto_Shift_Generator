@@ -1,8 +1,11 @@
 Attribute VB_Name = "AutoShiftGenerator"
 Option Explicit
 '==================================================================
-'  ShiftAuto v9.7.0
+'  ShiftAuto v9.7.1
 '  自動作成の入口と前半工程(準備～週リスト)。
+'  v9.7.1: ノルマ外の休み記号の既定値を ShiftCommon.PAID_OFF_DEFAULT に
+'          寄せた。ここと ShiftSchema に "有休" が二重に書かれており、
+'          片方だけ直すと設定シートが無いブックで挙動が食い違う。
 '  v9.7.0: 読まれない設定を事前確認で知らせるようにした。月間休日数は
 '          勤務ルールが通常の人しか見ないため、固定曜日・週N日の人に
 '          入れても黙って捨てられていた。入力できるのに効かない欄は
@@ -226,7 +229,7 @@ Private Function AS_準備() As Boolean
 190  mMaxOffRun = CLng(CfgNum(mCfg, "連休", 3))
 200  mWeekBase = CLng(CfgNum(mCfg, "週の基本", 2))
 210  mReqPlus = CLng(CfgNum(mCfg, "必要出勤", 1))
-220  mPaidSyms = CfgTxt(mCfg, "ノルマ外", "有休")
+220  mPaidSyms = CfgTxt(mCfg, "ノルマ外", PAID_OFF_DEFAULT)
 230  mGSym = CfgTxt(mCfg, "2人目", SYM_MID)
 235  mClerkEarlyN = CLng(CfgNum(mCfg, "事務員の早番", CLERK_EARLY_DEFAULT))
 236  mLateBusy = CLng(CfgNum(mCfg, "混雑日", 0))
