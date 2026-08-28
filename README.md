@@ -41,7 +41,8 @@
 5. Excel に戻り `Alt` + `F8` → **`ShiftSetup_初期設定実行`** を実行
 
 手順の詳細とつまずきどころは **[docs/SETUP-ja.md](docs/SETUP-ja.md)**、
-日々の運用は **[docs/manual.html](docs/manual.html)** を参照してください。
+日々の運用は **[docs/manual.html](docs/manual.html)**、
+現場に配る 2 ページの要約は **[docs/シフト自動作成_クイックマニュアル.pdf](docs/%E3%82%B7%E3%83%95%E3%83%88%E8%87%AA%E5%8B%95%E4%BD%9C%E6%88%90_%E3%82%AF%E3%82%A4%E3%83%83%E3%82%AF%E3%83%9E%E3%83%8B%E3%83%A5%E3%82%A2%E3%83%AB.pdf)** を参照してください。
 
 ## モジュール構成
 
@@ -129,6 +130,8 @@ tools/build_sjis.py  src/ から dist/ を生成
 tools/check_vba.py   静的チェック（CI で実行）
 docs/SETUP-ja.md     導入手順・トラブルシューティング
 docs/manual.html     運用マニュアル（毎月の作業・設定の意味・困ったとき）
+docs/シフト自動作成_クイックマニュアル.pdf
+                     クイックマニュアル（2ページ。配置の流れとボタンの早見表）
 ```
 
 `src/` を編集したら、`dist/` を更新してからコミットしてください。
