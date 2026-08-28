@@ -1,10 +1,19 @@
 Attribute VB_Name = "ShiftSetup"
 Option Explicit
 '==================================================================
-'  シフト表 初期設定マクロ ＜標準モジュール ShiftSetup v3.1＞
+'  シフト表 初期設定マクロ ＜標準モジュール ShiftSetup v3.2＞
 '  2026-08-28
 '  ShiftCommon / ShiftSchema / ShiftClick と併用。
 '  シート上の位置はすべて ShiftCommon が解決する。
+'
+'  v3.2: 集計列を「公休 / 有休 / ○早番 / ▲遅番 / ●遅半 / n診出勤」に
+'        並べ替えた。休みを1列で総数として持つのをやめ、ノルマ対象
+'        (公休+希休)とノルマ外(有休+夏休+有休※)の2列に分ける。
+'        足せば従来の「休」の総数になり、公休の充足はそのまま読める。
+'        ★既存シートは AH:AL の意味が変わる。集計列を参照している
+'          シートや数式は貼り直しが必要。
+'        見出しは「空欄なら書く」だけでは古い見出しが残るため、
+'        マクロが過去に書いた見出しなら上書きするようにした。
 '
 '  v3.1: 集計列に「ノルマ休」(AM)を追加。AH「休」は公休・希休・夏休・
 '        有休・有休※を全部足した総数で、公休ノルマを満たしているかの
@@ -260,11 +269,41 @@ End Function
 '--- 集計列の見出し ---
 Private Function SS_AggHeads() As Variant
     On Error GoTo ErrHandler
-    SS_AggHeads = Array("休", "○早番", "▲遅番", "●遅半", _
-                        DOC_BUSY_N & "診出勤", "ノルマ休")
+    SS_AggHeads = Array("公休", "有休", "○早番", "▲遅番", "●遅半", _
+                        DOC_BUSY_N & "診出勤")
     Exit Function
 ErrHandler:
     LogError MODULE_NAME, "SS_AggHeads", Err.Number, Err.Description, Erl, ""
+End Function
+
+'--- マクロが過去に書いた集計列の見出し ---
+'    見出しは「空欄なら書く」方式だが、それだけでは版が上がって列の
+'    意味が変わったときに古い見出しが残り、中身と食い違う。
+'    ここに載っている文字なら、マクロが書いたものとみなして上書きする。
+'    載っていない文字は手で付けた見出しとみなし、触らない。
+Private Function SS_AggHeadsKnown() As Variant
+    On Error GoTo ErrHandler
+    SS_AggHeadsKnown = Array("休", "ノルマ休", "公休", "有休", _
+                             "○早番", "▲遅番", "●遅半", _
+                             DOC_BUSY_N & "診出勤")
+    Exit Function
+ErrHandler:
+    LogError MODULE_NAME, "SS_AggHeadsKnown", Err.Number, Err.Description, Erl, ""
+End Function
+
+'--- その見出しをマクロが上書きしてよいか(空欄 or 過去にマクロが書いた文字) ---
+Private Function SS_HeadIsOurs(ByVal v As String) As Boolean
+    Dim known As Variant, i As Long
+    On Error GoTo ErrHandler
+10  If Len(Trim$(v)) = 0 Then SS_HeadIsOurs = True: Exit Function
+20  known = SS_AggHeadsKnown()
+30  For i = LBound(known) To UBound(known)
+40      If Trim$(v) = CStr(known(i)) Then SS_HeadIsOurs = True: Exit Function
+50  Next i
+    Exit Function
+ErrHandler:
+    LogError MODULE_NAME, "SS_HeadIsOurs", Err.Number, Err.Description, Erl, "v=" & v
+    SS_HeadIsOurs = False
 End Function
 
 '--- 集計列「休」に数える記号 ---
@@ -276,12 +315,15 @@ ErrHandler:
     LogError MODULE_NAME, "SS_OffSyms", Err.Number, Err.Description, Erl, ""
 End Function
 
-'--- 集計列「ノルマ休」に数える記号 ---
-'    SS_OffSyms から、設定シート L11「ノルマ外の休み記号」に当たるものを
-'    除いたもの。判定は ShiftAutoLog.IsPaidOff と同じ部分一致なので、
-'    L11 に「有休」とだけ書けば「有休※」も外れる。
+'--- 集計列の休みを「ノルマ対象」と「ノルマ外」に振り分ける ---
+'    wantQuota=True  → 公休ノルマに数える記号(既定なら 公休・希休)
+'    wantQuota=False → ノルマ外の記号      (既定なら 有休・夏休・有休※)
+'    どちらに入るかは設定シート L11「ノルマ外の休み記号」で決まる。
+'    判定は ShiftAutoLog.IsPaidOff と同じ部分一致なので、L11 に
+'    「有休」とだけ書けば「有休※」も外れる。
 '    設定シートが無いときは PAID_OFF_DEFAULT を使う。
-Private Function SS_QuotaOffSyms() As Variant
+'    どちらにも入らない場合は空の配列を返す(数式側で 0 になる)。
+Private Function SS_OffSymsByQuota(ByVal wantQuota As Boolean) As Variant
     On Error GoTo ErrHandler
     Dim cfg As Worksheet, paid As String, parts() As String
     Dim syms As Variant, arr() As String, i As Long, p As Long
@@ -304,26 +346,26 @@ Private Function SS_QuotaOffSyms() As Variant
 140             If InStr(CStr(syms(i)), Trim$(parts(p))) > 0 Then isPaid = True
 150         End If
 160     Next p
-170     If Not isPaid Then
+170     If isPaid <> wantQuota Then
 180         arr(n) = CStr(syms(i))
 190         n = n + 1
 200     End If
 210 Next i
 
-    '--- 全部がノルマ外のときは数式を作れないので公休だけ残す ---
 220 If n = 0 Then
-230     ReDim arr(0 To 0): arr(0) = SYM_OFF: n = 1
-240 End If
-250 ReDim Preserve arr(0 To n - 1)
-260 SS_QuotaOffSyms = arr
+230     SS_OffSymsByQuota = Array()
+240 Else
+250     ReDim Preserve arr(0 To n - 1)
+260     SS_OffSymsByQuota = arr
+270 End If
 
-    LogSuccess MODULE_NAME, "SS_QuotaOffSyms", _
-               "Quota-counted off symbols: " & Join(arr, "/") & " (paid=" & paid & ")"
+    LogSuccess MODULE_NAME, "SS_OffSymsByQuota", _
+               "wantQuota=" & wantQuota & "; symbols=" & n & "; paid=" & paid
     Exit Function
 ErrHandler:
-    LogError MODULE_NAME, "SS_QuotaOffSyms", Err.Number, Err.Description, Erl, _
-             "paid=" & paid & "; i=" & i
-    SS_QuotaOffSyms = Array(SYM_OFF)
+    LogError MODULE_NAME, "SS_OffSymsByQuota", Err.Number, Err.Description, Erl, _
+             "wantQuota=" & wantQuota & "; paid=" & paid & "; i=" & i
+    SS_OffSymsByQuota = Array()
 End Function
 
 '--- 集計列「出勤」に数える記号 ---
@@ -737,7 +779,8 @@ End Function
 Public Sub ShiftSetup_集計列数式()
     Dim ws As Worksheet, topR As Long, botR As Long, hdrRow As Long
     Dim docRow As Long, aggCol As Long, r As Long, i As Long
-    Dim heads As Variant, rng As Range, quotaSyms As Variant
+    Dim heads As Variant, rng As Range
+    Dim quotaSyms As Variant, paidSyms As Variant
     On Error GoTo ErrHandler
 
 10  Set ws = ShiftSheet()
@@ -752,16 +795,17 @@ Public Sub ShiftSetup_集計列数式()
 90  hdrRow = topR - 1
 100 aggCol = ws.Range(COL_AGG & "1").Column
 110 heads = SS_AggHeads()
-    '--- ノルマ休が数える記号は全行で同じ。行ごとに設定を読み直さない ---
-115 quotaSyms = SS_QuotaOffSyms()
+    '--- 数える記号は全行で同じ。行ごとに設定を読み直さない ---
+115 quotaSyms = SS_OffSymsByQuota(True)
+116 paidSyms = SS_OffSymsByQuota(False)
 
 120 Application.EnableEvents = False
 130 Application.ScreenUpdating = False
 
-    '--- 見出し行(空欄のときだけ書く。手で短縮した見出しを戻さない) ---
+    '--- 見出し行(空欄 or マクロが書いた見出しなら書く。手書きは残す) ---
 140 For i = 0 To UBound(heads)
 150     With ws.Cells(hdrRow, aggCol + i)
-            If Len(Trim$(CStr(.Value))) = 0 Then .Value = heads(i)
+            If SS_HeadIsOurs(CStr(.Value)) Then .Value = heads(i)
             .Font.Bold = True
             .Font.size = FS_LABEL
             .HorizontalAlignment = xlCenter
@@ -773,12 +817,12 @@ Public Sub ShiftSetup_集計列数式()
 190     If Len(Trim$(CStr(ws.Cells(r, 1).Value))) = 0 Then
 200         ws.Range(ws.Cells(r, aggCol), ws.Cells(r, aggCol + UBound(heads))).ClearContents
 210     Else
-220         ws.Cells(r, aggCol + 0).Formula = SS_CountFormula(r, SS_OffSyms())
-230         ws.Cells(r, aggCol + 1).Formula = SS_CountFormula(r, Array(SYM_EARLY, SYM_EARLY_ALT))
-240         ws.Cells(r, aggCol + 2).Formula = SS_CountFormula(r, Array("▲"))
-250         ws.Cells(r, aggCol + 3).Formula = SS_CountFormula(r, Array("●"))
-260         ws.Cells(r, aggCol + 4).Formula = SS_BusyDayFormula(r, docRow)
-265         ws.Cells(r, aggCol + 5).Formula = SS_CountFormula(r, quotaSyms)
+220         ws.Cells(r, aggCol + 0).Formula = SS_CountFormula(r, quotaSyms)
+225         ws.Cells(r, aggCol + 1).Formula = SS_CountFormula(r, paidSyms)
+230         ws.Cells(r, aggCol + 2).Formula = SS_CountFormula(r, Array(SYM_EARLY, SYM_EARLY_ALT))
+240         ws.Cells(r, aggCol + 3).Formula = SS_CountFormula(r, Array("▲"))
+250         ws.Cells(r, aggCol + 4).Formula = SS_CountFormula(r, Array("●"))
+260         ws.Cells(r, aggCol + 5).Formula = SS_BusyDayFormula(r, docRow)
 270     End If
 280 Next r
 
@@ -816,6 +860,8 @@ Private Function SS_CountFormula(ByVal r As Long, ByVal syms As Variant) As Stri
 30      If Len(s) > 0 Then s = s & "+"
 40      s = s & "COUNTIF(" & rngRef & ",""" & syms(i) & """)"
 50  Next i
+    '--- 数える記号が1つも無いときは 0 を返す("=" だけでは壊れる) ---
+55  If Len(s) = 0 Then s = "0"
 60  SS_CountFormula = "=" & s
     Exit Function
 ErrHandler:

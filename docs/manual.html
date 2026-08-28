@@ -76,7 +76,7 @@
 <tr><td><code>ShiftAutoLog</code></td><td>v9.5.0</td><td>設定チェック・変更ログ・戻す・白紙化と共通ヘルパー</td></tr>
 <tr><td><code>ShiftClick</code></td><td>v9.4</td><td>クリック入力（パレットのモード切替・スタンプ・連続切替）</td></tr>
 <tr><td><code>ShiftSchema</code></td><td>v1.7</td><td>不足シート（自動作成設定／祝日マスタ／シフト変更ログ）の生成</td></tr>
-<tr><td><code>ShiftSetup</code></td><td>v3.1</td><td>シートの初期設定（パレット生成・集計行／集計列の数式・名前付き範囲）</td></tr>
+<tr><td><code>ShiftSetup</code></td><td>v3.2</td><td>シートの初期設定（パレット生成・集計行／集計列の数式・名前付き範囲）</td></tr>
 <tr><td><code>ShiftExport</code></td><td>v1.2</td><td>シフト表を印刷用に切り出して PDF / Excel へ出力</td></tr>
 <tr><td><code>ShiftSurvey</code></td><td>v2.2</td><td>シート構造の調査（読み取り専用）。行構成・数式・名前付き範囲をレポートに書き出します</td></tr>
 </table>
@@ -102,9 +102,9 @@
 <tr><td class="c"><code>備考</code> 行 + 2</td><td><code>医師数(診)</code>　医師名欄の COUNTA（自動生成）</td></tr>
 <tr><td class="c"><code>備考</code> 行 + 3</td><td><code>薬剤師出勤数</code>　区分が薬剤師の行の出勤記号を集計（自動生成）</td></tr>
 <tr><td class="c"><code>備考</code> 行 + 4</td><td><code>過不足</code>　出勤数 −（医師数 + n）。マイナスは人員不足（自動生成）</td></tr>
-<tr><td class="c">AH〜AM列</td><td>個人別の集計（休 / ○早番 / ▲遅番 / ●遅半 / 5診出勤 / ノルマ休）</td></tr>
-<tr><td class="c">AH列 <code>休</code></td><td>休みの<strong>総数</strong>。公休・希休・夏休・有休・有休※を全部足したもの</td></tr>
-<tr><td class="c">AM列 <code>ノルマ休</code></td><td><strong>公休ノルマに数える休みだけ</strong>。AH からノルマ外（L11の記号）を除いたもの。公休が足りているかはこの列で見ます</td></tr>
+<tr><td class="c">AH〜AM列</td><td>個人別の集計（公休 / 有休 / ○早番 / ▲遅番 / ●遅半 / 5診出勤）</td></tr>
+<tr><td class="c">AH列 <code>公休</code></td><td><strong>公休ノルマに数える休み</strong>（公休 + 希休）。この数をノルマ（土日祝の日数）と突き合わせます</td></tr>
+<tr><td class="c">AI列 <code>有休</code></td><td><strong>ノルマ外の休み</strong>（有休 + 夏休 + 有休※）。設定シート L11 で決まります。AH と足すと休みの総数になります</td></tr>
 </table>
 
 <div class="info">
@@ -191,7 +191,7 @@
 <tr><td><span class="macro">ShiftSetup_パレット生成</span></td><td>日付行の直上3行にパレットを作る。<strong>3行が無ければ自動で挿入します</strong></td></tr>
 <tr><td><span class="macro">ShiftSetup_ヘッダ数式</span></td><td>年月セルと祝日サマリーの数式をセット</td></tr>
 <tr><td><span class="macro">ShiftSetup_集計行数式</span></td><td><code>医師数(診)</code> / <code>薬剤師出勤数</code> / <code>過不足</code> の数式をセット</td></tr>
-<tr><td><span class="macro">ShiftSetup_集計列数式</span></td><td>AH〜AM列の個人別集計をセット。<code>ノルマ休</code>(AM)が数える記号は設定シート L11 に従って決まります</td></tr>
+<tr><td><span class="macro">ShiftSetup_集計列数式</span></td><td>AH〜AM列の個人別集計をセット。<code>公休</code>(AH)と<code>有休</code>(AI)の振り分けは設定シート L11 に従って決まります</td></tr>
 <tr><td><span class="macro">ShiftSetup_名前付き範囲更新</span></td><td>「シフト入力範囲」「シフトパレット」「医師名リスト範囲」「備考行範囲」を貼り直し、廃止した旧名を消す</td></tr>
 </table>
 
@@ -201,6 +201,14 @@
 これは施設が調整した値を勝手に戻さないための作りですが、裏を返すと「新しい既定値が届いていない」状態に気づけません。
 そこで <span class="macro">ShiftSetup_初期設定実行</span> は、既定値と違う項目を <code>L11 ノルマ外の休み記号 / 現在=有休 / 既定=有休,夏休</code> のように一覧で表示します。<br><br>
 <strong>値は書き換えません。</strong> 意図して変えた設定ならそのままで構いません。身に覚えがない項目があれば、版が上がって既定値が変わった可能性があるので、手で直してください。
+</div>
+
+<div class="warn">
+<strong>集計列の並びが変わりました（ShiftSetup v3.2）。</strong>
+以前は <code>休 / ○早番 / ▲遅番 / ●遅半 / 5診出勤</code> の順でしたが、いまは <code>公休 / 有休 / ○早番 / ▲遅番 / ●遅半 / 5診出勤</code> です。
+<strong>AH〜AL列の意味がすべて1つずつずれています。</strong><br><br>
+集計列を参照している数式や別シート（検証用シートなど）がある場合は、<span class="macro">ShiftSetup_初期設定実行</span> のあとに<strong>参照先を貼り直してください</strong>。マクロは集計列そのものは直しますが、他のシートからの参照までは追えません。<br><br>
+見出しは、マクロが過去に書いた文字（<code>休</code> <code>ノルマ休</code> など）であれば自動で新しい見出しに書き換わります。手で付けた見出しは残るので、その場合は中身とずれていないか確認してください。
 </div>
 
 <h3>生成される集計行の数式</h3>
@@ -311,7 +319,7 @@ STEP 7   手修正で仕上げ
 <h3><span class="step">STEP 1</span>希望休・有休の入力</h3>
 <p>パレットで <code>希休</code> <code>有休</code> <code>夏休</code> を選び、該当セルをダブルクリック。</p>
 <div class="info">
-<strong>有休・夏休は公休ノルマの外です。</strong> 設定シート L11「ノルマ外の休み記号」に指定された記号（既定=<code>有休,夏休</code>）は公休ノルマに数えられず、公休が別途その分配置されます。つまり有休・夏休を取った分だけ月の休みが増えます。<br><br><strong>既に運用中のブックは L11 を手で直してください。</strong> 設定シートは作り直されない仕組みなので、既定値を変えても既存のシートには反映されません。L11 が <code>有休</code> だけのままだと、夏休が公休ノルマを食います（夏休5日なら公休が11日→6日）。なお <code>有休※</code> は書かなくて構いません。判定は部分一致なので <code>有休</code> が <code>有休※</code> も拾います。<br><br><strong>公休が足りているかは AM列「ノルマ休」で見てください。</strong> AH列「休」は公休・希休・夏休・有休・有休※を全部足した<strong>総数</strong>なので、ノルマ判定には使えません。夏休5日の人は公休6日でも AH=11 になり、正常に見えてしまいます。AM は L11 のノルマ外記号を除いた数なので、そのままノルマ（土日祝の日数）と突き合わせられます。
+<strong>有休・夏休は公休ノルマの外です。</strong> 設定シート L11「ノルマ外の休み記号」に指定された記号（既定=<code>有休,夏休</code>）は公休ノルマに数えられず、公休が別途その分配置されます。つまり有休・夏休を取った分だけ月の休みが増えます。<br><br><strong>既に運用中のブックは L11 を手で直してください。</strong> 設定シートは作り直されない仕組みなので、既定値を変えても既存のシートには反映されません。L11 が <code>有休</code> だけのままだと、夏休が公休ノルマを食います（夏休5日なら公休が11日→6日）。なお <code>有休※</code> は書かなくて構いません。判定は部分一致なので <code>有休</code> が <code>有休※</code> も拾います。<br><br><strong>公休が足りているかは AH列「公休」で見てください。</strong> この列は公休ノルマに数える休み（公休 + 希休）だけを数えるので、そのままノルマ（土日祝の日数）と突き合わせられます。ノルマ外の休みは隣の AI列「有休」に分けてあり、2つを足すと休みの総数になります。<br><br><strong>1列にまとめた「休」（総数）は廃止しました。</strong> 夏休5日の人は公休6日でも総数は11になり、正常に見えてしまうためです。
 </div>
 
 <h3><span class="step">STEP 2</span>派遣・単発スタッフの入力</h3>
