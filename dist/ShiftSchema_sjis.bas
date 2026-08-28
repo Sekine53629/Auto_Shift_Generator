@@ -1,8 +1,15 @@
 Attribute VB_Name = "ShiftSchema"
 Option Explicit
 '==================================================================
-'  シフト表 シート生成モジュール ＜標準モジュール ShiftSchema v1.6＞
+'  シフト表 シート生成モジュール ＜標準モジュール ShiftSchema v1.7＞
 '  2026-08-28
+'
+'  v1.7: ShiftSchema_設定差分 を追加。全体設定は SC_SetIfBlank で
+'        「空欄のときだけ」書くため、コード側の既定値が変わっても
+'        既存ブックには伝わらない。夏休がノルマを食っていた件が
+'        誰にも気づかれなかったのはこのため。既定値と違う項目を
+'        一覧で返し、初期設定実行の完了メッセージに出す。
+'        値は書き換えない(意図して変えた設定を勝手に戻さないため)。
 '
 '  v1.6: ノルマ外の休み記号の既定値を ShiftCommon.PAID_OFF_DEFAULT に
 '        寄せ、「夏休」を足した。既定が「有休」
@@ -112,6 +119,58 @@ Private Function SC_SetVals() As Variant
     Exit Function
 ErrHandler:
     LogError MODULE_NAME, "SC_SetVals", Err.Number, Err.Description, Erl, ""
+End Function
+
+'==================================================================
+' 全体設定が既定値と違う項目を一覧にする(知らせるだけ。書き換えない)
+'   全体設定は SC_SetIfBlank で「空欄のときだけ」書くため、既存の
+'   シートはコード側の既定値が変わっても古いままになる。実行のたびに
+'   差分を出しておかないと、取り残しに気づく手段が無い。
+'   施設の判断で変えた値も差分に出るが、値は変えないので害はない。
+'==================================================================
+Public Function ShiftSchema_設定差分() As String
+    On Error GoTo ErrHandler
+    Dim ws As Worksheet, keys As Variant, vals As Variant
+    Dim i As Long, r As Long, cur As String, dft As String
+    Dim lab As String, body As String, hitN As Long
+
+10  Set ws = SheetOrNothing(SHT_CFG)
+20  If ws Is Nothing Then GoTo Done
+
+30  keys = SC_SetKeys()
+40  vals = SC_SetVals()
+
+    '--- 先頭は見出し行なので比べない ---
+50  For i = LBound(keys) + 1 To UBound(keys)
+60       r = CFG_SET_ROW + i
+70       lab = Trim$(CStr(ws.Cells(r, CFG_COL_SETK).Value))
+80       cur = Trim$(CStr(ws.Cells(r, CFG_COL_SETV).Value))
+90       dft = Trim$(CStr(vals(i)))
+         '--- K列が空の行は設定行として存在しないので比べない ---
+100      If Len(lab) = 0 Then
+110      ElseIf cur <> dft Then
+120          hitN = hitN + 1
+130          body = body & "・" & ColLetter(CFG_COL_SETV) & r & " " & lab & vbCrLf & _
+                    "　　現在=" & IIf(Len(cur) = 0, "(空欄)", cur) & _
+                    "　既定=" & dft & vbCrLf
+140      End If
+150 Next i
+
+160 If hitN > 0 Then
+170     ShiftSchema_設定差分 = vbCrLf & _
+            "■ 既定値と異なる全体設定 (" & hitN & "件)" & vbCrLf & body & _
+            "　意図して変えた設定ならこのままで問題ありません。" & vbCrLf & _
+            "　身に覚えが無ければ、版が上がって既定値が変わった可能性があります。" & vbCrLf
+180 End If
+
+Done:
+    LogSuccess MODULE_NAME, "ShiftSchema_設定差分", _
+               "Compared global settings; " & hitN & " differ from defaults"
+    Exit Function
+ErrHandler:
+    LogError MODULE_NAME, "ShiftSchema_設定差分", Err.Number, Err.Description, Erl, _
+             "i=" & i & "; r=" & r & "; lab=" & lab
+    ShiftSchema_設定差分 = ""
 End Function
 
 '--- 区分・勤務ルール・可否の選択肢(入力規則に使う) ---
