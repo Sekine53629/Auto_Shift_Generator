@@ -1,7 +1,14 @@
 Option Explicit
 '==================================================================
-'  シフト表 シート生成モジュール ＜標準モジュール ShiftSchema v1.5＞
-'  2026-08-27
+'  シフト表 シート生成モジュール ＜標準モジュール ShiftSchema v1.6＞
+'  2026-08-28
+'
+'  v1.6: ノルマ外の休み記号の既定値を ShiftCommon.PAID_OFF_DEFAULT に
+'        寄せ、「夏休」を足した。既定が「有休」
+'        だけだったため、夏休が公休ノルマを食い、夏休5日の人の公休が
+'        11日から6日に減っていた。IsPaidOff は部分一致なので
+'        「有休」が「有休※」も拾う。既存の設定シートは作り直さない
+'        方針なので、運用中のブックは L11 を手で直す必要がある。
 '
 '  v1.5: 全体設定に「不足を埋めるときの連勤上限の上乗せ」を追加。
 '
@@ -99,7 +106,7 @@ End Function
 Private Function SC_SetVals() As Variant
     On Error GoTo ErrHandler
     '  1件目は見出しなので値なし("値" を入れる)
-    SC_SetVals = Array("値", 1, 3, 3, 3, 2, 1, "有休", _
+    SC_SetVals = Array("値", 1, 3, 3, 3, 2, 1, PAID_OFF_DEFAULT, _
                        "日曜始まり・土曜終わり", "●", CLERK_EARLY_DEFAULT, 0, 0)
     Exit Function
 ErrHandler:
